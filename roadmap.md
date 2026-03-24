@@ -35,128 +35,583 @@
 
 | Component        | Technology                  | Purpose                                      |
 |------------------|-----------------------------|----------------------------------------------|
+| Language         | TypeScript                  | Type safety across the entire codebase       |
 | API Server       | Node.js + Express           | REST API, WebSocket server                   |
 | Authentication   | JWT (jsonwebtoken)          | Stateless auth tokens                        |
 | ORM              | Prisma                      | Type-safe database access                    |
+| Validation       | Zod                         | Runtime schema validation                    |
 | Database         | PostgreSQL                  | Persistent storage                           |
 | Job Queue        | Redis + BullMQ              | Async job processing with retries            |
 | Real-time        | Socket.io + Redis Adapter   | WebSocket with multi-server support          |
 | Worker           | Node.js + Dockerode         | Programmatic Docker container management     |
 | Sandbox          | Docker containers           | Isolated code execution                      |
-| Frontend         | React + Monaco Editor       | Code editor UI                               |
+| Frontend         | React + TypeScript + Vite   | Code editor UI                               |
 | Local Dev        | Docker Compose              | One-command local environment                |
 | Orchestration    | Kubernetes + KEDA           | Production scaling (Phase 3)                 |
 
 ---
 
+## Project Structure (Production-Grade)
+
+We follow a clean **Controller → Service → Repository** architecture:
+
+```
+code-execution-platform/
+│
+├── docker-compose.yml              # Local development orchestration
+├── .env.example                    # Environment template
+├── .gitignore
+├── README.md
+│
+├── api/                            # API Server (Express + TypeScript)
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── .env
+│   ├── Dockerfile
+│   │
+│   ├── prisma/
+│   │   ├── schema.prisma           # Database schema
+│   │   ├── migrations/             # Migration history
+│   │   └── seed.ts                 # Seed data script
+│   │
+│   └── src/
+│       ├── index.ts                # Entry point — bootstraps the app
+│       ├── app.ts                  # Express app configuration
+│       ├── server.ts               # HTTP + WebSocket server setup
+│       │
+│       ├── config/                 # Configuration & environment
+│       │   ├── index.ts            # Exports all config
+│       │   ├── env.ts              # Environment variable loader (typed)
+│       │   ├── database.ts         # Prisma client singleton
+│       │   ├── redis.ts            # Redis client singleton
+│       │   └── queue.ts            # BullMQ queue configuration
+│       │
+│       ├── types/                  # Shared TypeScript types
+│       │   ├── index.ts            # Re-exports all types
+│       │   ├── auth.types.ts       # Auth-related types
+│       │   ├── problem.types.ts    # Problem-related types
+│       │   ├── submission.types.ts # Submission-related types
+│       │   └── queue.types.ts      # Job payload types
+│       │
+│       ├── routes/                 # Route definitions (thin layer)
+│       │   ├── index.ts            # Route aggregator
+│       │   ├── auth.routes.ts      # /api/auth/*
+│       │   ├── problem.routes.ts   # /api/problems/*
+│       │   └── submission.routes.ts# /api/submissions/*
+│       │
+│       ├── controllers/            # Request handlers (HTTP logic only)
+│       │   ├── auth.controller.ts
+│       │   ├── problem.controller.ts
+│       │   └── submission.controller.ts
+│       │
+│       ├── services/               # Business logic (reusable, testable)
+│       │   ├── auth.service.ts     # Password hashing, JWT generation
+│       │   ├── problem.service.ts  # Problem CRUD operations
+│       │   ├── submission.service.ts # Submission handling, job queuing
+│       │   └── queue.service.ts    # BullMQ producer abstraction
+│       │
+│       ├── repositories/           # Data access layer (Prisma queries)
+│       │   ├── user.repository.ts
+│       │   ├── problem.repository.ts
+│       │   └── submission.repository.ts
+│       │
+│       ├── middleware/             # Express middleware
+│       │   ├── auth.middleware.ts  # JWT verification
+│       │   ├── error.middleware.ts # Global error handler
+│       │   ├── validate.middleware.ts # Zod validation middleware
+│       │   └── logger.middleware.ts   # Request logging
+│       │
+│       ├── validators/             # Zod schemas for request validation
+│       │   ├── auth.validator.ts
+│       │   ├── problem.validator.ts
+│       │   └── submission.validator.ts
+│       │
+│       ├── websocket/              # Socket.io setup
+│       │   ├── index.ts            # WebSocket initialization
+│       │   └── handlers.ts         # Event handlers
+│       │
+│       └── utils/                  # Utility functions
+│           ├── response.ts         # Standardized API responses
+│           ├── errors.ts           # Custom error classes
+│           └── logger.ts           # Winston/Pino logger setup
+│
+├── worker/                         # Execution Worker (TypeScript)
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── .env
+│   ├── Dockerfile
+│   │
+│   └── src/
+│       ├── index.ts                # Entry point — starts BullMQ worker
+│       │
+│       ├── config/
+│       │   ├── index.ts
+│       │   ├── env.ts              # Environment variables
+│       │   ├── database.ts         # Prisma client
+│       │   ├── redis.ts            # Redis connection
+│       │   └── docker.ts           # Dockerode client configuration
+│       │
+│       ├── types/
+│       │   ├── index.ts
+│       │   ├── job.types.ts        # Job payload interfaces
+│       │   └── execution.types.ts  # Execution result interfaces
+│       │
+│       ├── processors/             # Job processors
+│       │   └── execution.processor.ts # Main job handler
+│       │
+│       ├── executor/               # Docker execution logic
+│       │   ├── index.ts            # Executor factory
+│       │   ├── base.executor.ts    # Abstract base class
+│       │   ├── python.executor.ts  # Python-specific execution
+│       │   └── java.executor.ts    # Java-specific execution (compile + run)
+│       │
+│       ├── sandbox/                # Container management
+│       │   ├── container.ts        # Docker container lifecycle
+│       │   └── limits.ts           # Resource limit configuration
+│       │
+│       ├── grader/                 # Output grading logic
+│       │   ├── comparator.ts       # Output comparison strategies
+│       │   └── verdict.ts          # Verdict determination
+│       │
+│       ├── services/
+│       │   ├── submission.service.ts # Update submission status in DB
+│       │   └── notification.service.ts # Publish results to Redis
+│       │
+│       └── utils/
+│           ├── logger.ts
+│           └── temp-file.ts        # Temp directory management
+│
+├── shared/                         # Shared code between api and worker
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── src/
+│       ├── types/                  # Shared type definitions
+│       │   ├── submission.ts
+│       │   ├── verdict.ts
+│       │   └── language.ts
+│       ├── constants/              # Shared constants
+│       │   └── languages.ts        # Supported language configs
+│       └── utils/
+│           └── index.ts
+│
+├── sandbox-images/                 # Docker images for code execution
+│   ├── python3/
+│   │   └── Dockerfile
+│   ├── java/
+│   │   └── Dockerfile
+│   └── build-all.sh                # Script to build all images
+│
+├── frontend/                       # React + TypeScript + Vite
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── vite.config.ts
+│   ├── index.html
+│   ├── Dockerfile
+│   │
+│   └── src/
+│       ├── main.tsx
+│       ├── App.tsx
+│       ├── vite-env.d.ts
+│       │
+│       ├── api/                    # API client layer
+│       │   ├── client.ts           # Axios instance with interceptors
+│       │   ├── auth.api.ts
+│       │   ├── problems.api.ts
+│       │   └── submissions.api.ts
+│       │
+│       ├── hooks/                  # Custom React hooks
+│       │   ├── useAuth.ts
+│       │   ├── useProblems.ts
+│       │   ├── useSubmission.ts
+│       │   └── useSocket.ts
+│       │
+│       ├── context/                # React context providers
+│       │   ├── AuthContext.tsx
+│       │   └── SocketContext.tsx
+│       │
+│       ├── components/             # Reusable UI components
+│       │   ├── ui/                 # Generic components (Button, Input, etc.)
+│       │   ├── layout/             # Layout components (Header, Sidebar)
+│       │   ├── editor/             # Monaco editor wrapper
+│       │   └── problem/            # Problem-specific components
+│       │
+│       ├── pages/                  # Page components (route targets)
+│       │   ├── HomePage.tsx
+│       │   ├── LoginPage.tsx
+│       │   ├── RegisterPage.tsx
+│       │   ├── ProblemsPage.tsx
+│       │   └── ProblemDetailPage.tsx
+│       │
+│       ├── types/                  # Frontend TypeScript types
+│       │   └── index.ts
+│       │
+│       └── utils/
+│           └── index.ts
+│
+└── k8s/                            # Kubernetes manifests
+    ├── namespace.yaml
+    ├── configmap.yaml
+    ├── secrets.yaml
+    │
+    ├── postgres/
+    │   ├── deployment.yaml
+    │   ├── service.yaml
+    │   └── pvc.yaml
+    │
+    ├── redis/
+    │   ├── deployment.yaml
+    │   └── service.yaml
+    │
+    ├── api/
+    │   ├── deployment.yaml
+    │   ├── service.yaml
+    │   └── ingress.yaml
+    │
+    ├── worker/
+    │   ├── deployment.yaml
+    │   └── keda-scaledobject.yaml  # KEDA autoscaler
+    │
+    └── frontend/
+        ├── deployment.yaml
+        ├── service.yaml
+        └── ingress.yaml
+```
+
+---
+
+## Architecture Pattern Explained
+
+### Controller → Service → Repository
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         HTTP Request                                │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  ROUTES (routes/*.ts)                                               │
+│  - Define URL patterns                                              │
+│  - Attach middleware                                                │
+│  - Delegate to controllers                                          │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  CONTROLLERS (controllers/*.ts)                                     │
+│  - Parse request (params, body, query)                              │
+│  - Call service methods                                             │
+│  - Format HTTP response                                             │
+│  - Handle HTTP-specific errors                                      │
+│  - NO business logic here                                           │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  SERVICES (services/*.ts)                                           │
+│  - Business logic lives here                                        │
+│  - Orchestrates multiple repositories                               │
+│  - Handles transactions                                             │
+│  - Framework-agnostic (can be reused in CLI, tests, etc.)           │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  REPOSITORIES (repositories/*.ts)                                   │
+│  - Data access only                                                 │
+│  - Prisma queries                                                   │
+│  - No business logic                                                │
+│  - Single responsibility: talk to database                          │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                          PostgreSQL                                 │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Why This Pattern?
+
+| Layer | Responsibility | Testability |
+|-------|---------------|-------------|
+| **Routes** | URL mapping, middleware chain | Integration tests |
+| **Controllers** | HTTP request/response handling | Mock services |
+| **Services** | Business logic, orchestration | Unit tests with mocked repos |
+| **Repositories** | Database queries | Unit tests with test DB |
+
+### Example Flow: User Submits Code
+
+```typescript
+// 1. ROUTE - defines the endpoint
+router.post('/', authMiddleware, validate(submitCodeSchema), submissionController.submit);
+
+// 2. CONTROLLER - handles HTTP
+async submit(req: Request, res: Response, next: NextFunction) {
+  const { problemId, language, code } = req.body;
+  const userId = req.user.id;
+  
+  const result = await submissionService.createSubmission({ userId, problemId, language, code });
+  
+  res.status(202).json({ submissionId: result.id, message: 'Submission queued' });
+}
+
+// 3. SERVICE - business logic
+async createSubmission(data: CreateSubmissionDTO): Promise<Submission> {
+  const problem = await problemRepository.findById(data.problemId);
+  if (!problem) throw new NotFoundError('Problem not found');
+  
+  const submission = await submissionRepository.create({
+    ...data,
+    status: 'PENDING',
+  });
+  
+  await queueService.addExecutionJob({
+    submissionId: submission.id,
+    code: data.code,
+    language: data.language,
+    testCases: problem.testCases,
+    limits: { timeMs: problem.timeLimitMs, memoryMb: problem.memoryLimitMb },
+  });
+  
+  return submission;
+}
+
+// 4. REPOSITORY - database access
+async create(data: Prisma.SubmissionCreateInput): Promise<Submission> {
+  return this.prisma.submission.create({ data });
+}
+```
+
+---
+
 ## Phase 0 — Environment Setup & Project Scaffold
 
-**Goal:** One command creates the full folder structure. All prerequisites verified.
+**Goal:** Full TypeScript monorepo structure with proper tooling configured.
 
 ### Milestone 0.1 — Verify Prerequisites
 
 **What:** Ensure all required tools are installed on your machine.
 
 **Steps:**
-1. Check Node.js version (need 18+):
+1. Check Node.js version (need 20+):
    ```bash
-   node --version
+   node --version   # Should be v20.x or higher
    ```
-2. Check Docker is running:
+2. Check pnpm (recommended) or npm:
+   ```bash
+   pnpm --version   # Or: npm --version
+   ```
+3. Check Docker is running:
    ```bash
    docker --version
    docker ps
    ```
-3. Check Docker Compose:
+4. Check Docker Compose:
    ```bash
-   docker-compose --version
+   docker compose version   # Note: v2 syntax (no hyphen)
    ```
-4. Check Git:
+5. Check Git:
    ```bash
    git --version
    ```
 
-**Success Criteria:** All four commands return version numbers without errors.
+**Success Criteria:** All commands return version numbers without errors.
 
 ---
 
 ### Milestone 0.2 — Create Project Structure
 
-**What:** Set up the monorepo folder structure.
+**What:** Set up the complete TypeScript monorepo folder structure.
 
 **Steps:**
-1. Create root directory and enter it:
-   ```bash
-   mkdir code-execution-platform && cd code-execution-platform
-   ```
-2. Create all subdirectories:
-   ```bash
-   mkdir -p api/src/{routes,middleware,db,queue,websocket}
-   mkdir -p api/prisma
-   mkdir -p worker/src/{executor,grader}
-   mkdir -p frontend/src
-   mkdir -p sandbox-images/{python3,java}
-   mkdir -p k8s
-   ```
+```bash
+# Create the complete directory structure
+mkdir -p api/src/{config,types,routes,controllers,services,repositories,middleware,validators,websocket,utils}
+mkdir -p api/prisma/migrations
 
-**Resulting Structure:**
-```
-code-execution-platform/
-├── api/
-│   ├── src/
-│   │   ├── routes/
-│   │   ├── middleware/
-│   │   ├── db/
-│   │   ├── queue/
-│   │   └── websocket/
-│   └── prisma/
-├── worker/
-│   └── src/
-│       ├── executor/
-│       └── grader/
-├── frontend/
-│   └── src/
-├── sandbox-images/
-│   ├── python3/
-│   └── java/
-└── k8s/
+mkdir -p worker/src/{config,types,processors,executor,sandbox,grader,services,utils}
+
+mkdir -p shared/src/{types,constants,utils}
+
+mkdir -p frontend/src/{api,hooks,context,components/{ui,layout,editor,problem},pages,types,utils}
+
+mkdir -p sandbox-images/{python3,java}
+
+mkdir -p k8s/{postgres,redis,api,worker,frontend}
 ```
 
-**Success Criteria:** Running `tree` or `ls -R` shows the complete structure.
+**Success Criteria:** Running `tree -d` shows the complete structure.
 
 ---
 
-### Milestone 0.3 — Initialize Node.js Projects
+### Milestone 0.3 — Initialize TypeScript Projects
 
-**What:** Create `package.json` for API and Worker services.
+**What:** Set up `package.json` and `tsconfig.json` for all services.
 
-**Steps:**
-1. Initialize API:
-   ```bash
-   cd api
-   npm init -y
-   cd ..
-   ```
-2. Initialize Worker:
-   ```bash
-   cd worker
-   npm init -y
-   cd ..
-   ```
+**API package.json:**
+```bash
+cd api
+npm init -y
+```
 
-**Success Criteria:** Both `api/package.json` and `worker/package.json` exist.
+**Edit `api/package.json`:**
+```json
+{
+  "name": "codeex-api",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "db:migrate": "prisma migrate dev",
+    "db:generate": "prisma generate",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:studio": "prisma studio",
+    "lint": "eslint src/",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.10.0",
+    "bcryptjs": "^2.4.3",
+    "bullmq": "^5.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0",
+    "express": "^4.18.2",
+    "helmet": "^7.1.0",
+    "ioredis": "^5.3.2",
+    "jsonwebtoken": "^9.0.2",
+    "socket.io": "^4.7.4",
+    "uuid": "^9.0.1",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/node": "^20.11.0",
+    "@types/uuid": "^9.0.7",
+    "prisma": "^5.10.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}
+```
+
+**API tsconfig.json:**
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "baseUrl": "./src",
+    "paths": {
+      "@config/*": ["config/*"],
+      "@types/*": ["types/*"],
+      "@routes/*": ["routes/*"],
+      "@controllers/*": ["controllers/*"],
+      "@services/*": ["services/*"],
+      "@repositories/*": ["repositories/*"],
+      "@middleware/*": ["middleware/*"],
+      "@validators/*": ["validators/*"],
+      "@utils/*": ["utils/*"]
+    }
+  },
+  "include": ["src/**/*", "prisma/seed.ts"],
+  "exclude": ["node_modules", "dist"]
+}
+```
+
+**Worker package.json:**
+```json
+{
+  "name": "codeex-worker",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "lint": "eslint src/",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.10.0",
+    "bullmq": "^5.1.0",
+    "dockerode": "^4.0.2",
+    "dotenv": "^16.4.0",
+    "ioredis": "^5.3.2",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^3.3.23",
+    "@types/node": "^20.11.0",
+    "@types/uuid": "^9.0.7",
+    "prisma": "^5.10.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}
+```
+
+**Worker tsconfig.json:**
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "sourceMap": true,
+    "baseUrl": "./src",
+    "paths": {
+      "@config/*": ["config/*"],
+      "@types/*": ["types/*"],
+      "@executor/*": ["executor/*"],
+      "@grader/*": ["grader/*"],
+      "@services/*": ["services/*"],
+      "@utils/*": ["utils/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+```
+
+**Install dependencies:**
+```bash
+cd api && npm install && cd ..
+cd worker && npm install && cd ..
+```
+
+**Success Criteria:** 
+- `npm run type-check` passes in both directories
+- `npm run dev` starts without TypeScript errors
 
 ---
 
-### Milestone 0.4 — Create Docker Compose Skeleton
+### Milestone 0.4 — Create Docker Compose (Development)
 
-**What:** Create a minimal `docker-compose.yml` with just PostgreSQL and Redis.
-
-**Steps:**
-1. Create `docker-compose.yml` in the project root with:
-   - PostgreSQL 15 on port 5432
-   - Redis 7 on port 6379
-   - Persistent volumes for data
+**What:** Docker Compose for local development with PostgreSQL and Redis.
 
 **File: `docker-compose.yml`**
 ```yaml
@@ -187,61 +642,169 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    command: redis-server --appendonly yes
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
 
+  # Optional: Redis Commander for queue inspection
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: codeex-redis-commander
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+
 volumes:
   postgres_data:
   redis_data:
 ```
 
-2. Start the services:
-   ```bash
-   docker-compose up -d
-   ```
-3. Verify they are running:
-   ```bash
-   docker-compose ps
-   ```
+**Start services:**
+```bash
+docker compose up -d
+docker compose ps   # Verify healthy status
+```
 
-**Success Criteria:** Both containers show as "healthy" in `docker-compose ps`.
+**Success Criteria:** `docker compose ps` shows postgres and redis as "healthy".
 
 ---
 
-### Milestone 0.5 — Create Environment Files
+### Milestone 0.5 — Environment Configuration (Type-Safe)
 
-**What:** Set up `.env` files for configuration.
+**What:** Create typed environment configuration.
+
+**File: `.env.example` (root)**
+```env
+# Database
+DATABASE_URL="postgresql://codeex:codeex123@localhost:5432/codeex"
+
+# Redis
+REDIS_URL="redis://localhost:6379"
+
+# API Server
+PORT=8080
+NODE_ENV=development
+
+# JWT
+JWT_SECRET="your-super-secret-key-change-in-production"
+JWT_EXPIRES_IN="7d"
+
+# Docker (Worker)
+DOCKER_SOCKET_PATH="/var/run/docker.sock"
+```
+
+**Copy to actual env files:**
+```bash
+cp .env.example api/.env
+cp .env.example worker/.env
+```
+
+**File: `api/src/config/env.ts`**
+```typescript
+import { z } from 'zod';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  PORT: z.string().transform(Number).default('8080'),
+  DATABASE_URL: z.string().url(),
+  REDIS_URL: z.string(),
+  JWT_SECRET: z.string().min(32),
+  JWT_EXPIRES_IN: z.string().default('7d'),
+});
+
+const parsed = envSchema.safeParse(process.env);
+
+if (!parsed.success) {
+  console.error('Invalid environment variables:', parsed.error.flatten().fieldErrors);
+  process.exit(1);
+}
+
+export const env = parsed.data;
+```
+
+**File: `.gitignore` (root)**
+```gitignore
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Prisma
+api/prisma/migrations/*_migration_lock.toml
+
+# Temp files
+tmp/
+temp/
+```
+
+**Success Criteria:**
+- Environment files exist and are git-ignored
+- `api/src/config/env.ts` compiles without errors
+
+---
+
+### Milestone 0.6 — Git Repository Initialization
+
+**What:** Initialize Git with proper commit.
 
 **Steps:**
-1. Create `api/.env`:
-   ```env
-   DATABASE_URL="postgresql://codeex:codeex123@localhost:5432/codeex"
-   REDIS_URL="redis://localhost:6379"
-   JWT_SECRET="your-super-secret-key-change-in-production"
-   PORT=8080
-   ```
-2. Create `worker/.env`:
-   ```env
-   DATABASE_URL="postgresql://codeex:codeex123@localhost:5432/codeex"
-   REDIS_URL="redis://localhost:6379"
-   ```
-3. Add `.env` to `.gitignore` at the project root.
+```bash
+git init
+git add .
+git commit -m "chore: initial project scaffold with TypeScript config"
+```
 
-**Success Criteria:** Environment files exist and are git-ignored.
+**Success Criteria:** Clean git status after commit.
 
 ---
 
 ## Phase 0 Checkpoint
 
-Run these commands to verify Phase 0 is complete:
+Verification commands:
 ```bash
-docker-compose ps          # Shows postgres and redis as healthy
-ls api/package.json        # File exists
-ls worker/package.json     # File exists
-ls api/.env                # File exists
+# Services running
+docker compose ps
+
+# TypeScript compiles
+cd api && npm run type-check && cd ..
+cd worker && npm run type-check && cd ..
+
+# Environment loaded
+cat api/.env | head -3
+
+# Git clean
+git status
 ```
 
 ---
@@ -405,74 +968,149 @@ enum Verdict {
 
 ---
 
-### Milestone 1.4 — Create Seed Script
+### Milestone 1.4 — Create Seed Script (TypeScript)
 
-**What:** Write a script to insert sample data for testing.
+**What:** Write a typed script to insert sample data for testing.
 
-**File: `api/prisma/seed.js`**
-```javascript
-const { PrismaClient } = require('@prisma/client');
+**File: `api/prisma/seed.ts`**
+```typescript
+import { PrismaClient, Difficulty } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-async function main() {
-  // Clear existing data
+async function main(): Promise<void> {
+  console.log('Seeding database...');
+
+  // Clear existing data (in correct order due to foreign keys)
   await prisma.submission.deleteMany();
   await prisma.testCase.deleteMany();
   await prisma.problem.deleteMany();
   await prisma.user.deleteMany();
 
-  // Create a sample problem: Two Sum
-  const problem = await prisma.problem.create({
+  // Seed Problem 1: Two Sum
+  const twoSum = await prisma.problem.create({
     data: {
       title: 'Two Sum',
       description: `Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.
 
 You may assume that each input would have exactly one solution, and you may not use the same element twice.
 
-**Example:**
+## Example
+\`\`\`
 Input: nums = [2,7,11,15], target = 9
 Output: [0,1]
 Explanation: Because nums[0] + nums[1] == 9, we return [0, 1].
+\`\`\`
 
-**Input Format:**
+## Input Format
 - First line: space-separated integers (the array)
 - Second line: the target integer
 
-**Output Format:**
-- Two space-separated indices`,
-      difficulty: 'EASY',
+## Output Format
+- Two space-separated indices (0-indexed)`,
+      difficulty: Difficulty.EASY,
       timeLimitMs: 2000,
       memoryLimitMb: 256,
       testCases: {
         create: [
-          {
-            input: '2 7 11 15\n9',
-            expectedOutput: '0 1',
-            isSample: true,
-          },
-          {
-            input: '3 2 4\n6',
-            expectedOutput: '1 2',
-            isSample: true,
-          },
-          {
-            input: '3 3\n6',
-            expectedOutput: '0 1',
-            isSample: false,
-          },
+          { input: '2 7 11 15\n9', expectedOutput: '0 1', isSample: true },
+          { input: '3 2 4\n6', expectedOutput: '1 2', isSample: true },
+          { input: '3 3\n6', expectedOutput: '0 1', isSample: false },
+          { input: '1 5 3 7 2\n9', expectedOutput: '1 3', isSample: false },
         ],
       },
     },
   });
 
-  console.log('Seeded problem:', problem.title);
-  console.log('Problem ID:', problem.id);
+  // Seed Problem 2: FizzBuzz
+  const fizzBuzz = await prisma.problem.create({
+    data: {
+      title: 'FizzBuzz',
+      description: `Write a program that prints the numbers from 1 to n. But for multiples of three, print "Fizz" instead of the number, and for multiples of five, print "Buzz". For numbers which are multiples of both three and five, print "FizzBuzz".
+
+## Example
+\`\`\`
+Input: 15
+Output:
+1
+2
+Fizz
+4
+Buzz
+Fizz
+7
+8
+Fizz
+Buzz
+11
+Fizz
+13
+14
+FizzBuzz
+\`\`\`
+
+## Input Format
+- A single integer n (1 <= n <= 100)
+
+## Output Format
+- Print each number or word on a new line`,
+      difficulty: Difficulty.EASY,
+      timeLimitMs: 1000,
+      memoryLimitMb: 128,
+      testCases: {
+        create: [
+          { input: '5', expectedOutput: '1\n2\nFizz\n4\nBuzz', isSample: true },
+          { input: '15', expectedOutput: '1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz\n11\nFizz\n13\n14\nFizzBuzz', isSample: false },
+          { input: '3', expectedOutput: '1\n2\nFizz', isSample: false },
+        ],
+      },
+    },
+  });
+
+  // Seed Problem 3: Reverse String (Medium)
+  const reverseString = await prisma.problem.create({
+    data: {
+      title: 'Reverse Words in a String',
+      description: `Given an input string s, reverse the order of the words.
+
+A word is defined as a sequence of non-space characters. The words in s will be separated by at least one space.
+
+Return a string of the words in reverse order concatenated by a single space.
+
+## Example
+\`\`\`
+Input: "the sky is blue"
+Output: "blue is sky the"
+\`\`\`
+
+## Input Format
+- A single line containing the string
+
+## Output Format
+- The reversed string`,
+      difficulty: Difficulty.MEDIUM,
+      timeLimitMs: 1000,
+      memoryLimitMb: 128,
+      testCases: {
+        create: [
+          { input: 'the sky is blue', expectedOutput: 'blue is sky the', isSample: true },
+          { input: 'hello world', expectedOutput: 'world hello', isSample: true },
+          { input: 'a', expectedOutput: 'a', isSample: false },
+        ],
+      },
+    },
+  });
+
+  console.log('Seeded problems:');
+  console.log(`  - ${twoSum.title} (${twoSum.id})`);
+  console.log(`  - ${fizzBuzz.title} (${fizzBuzz.id})`);
+  console.log(`  - ${reverseString.title} (${reverseString.id})`);
+  console.log('Database seeding completed!');
 }
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error('Seeding failed:', e);
     process.exit(1);
   })
   .finally(async () => {
@@ -480,38 +1118,53 @@ main()
   });
 ```
 
-**Steps:**
-1. Add seed command to `api/package.json`:
-   ```json
-   {
-     "prisma": {
-       "seed": "node prisma/seed.js"
-     }
-   }
-   ```
-2. Run the seed:
-   ```bash
-   npx prisma db seed
-   ```
+**Update `api/package.json`** (add prisma seed config):
+```json
+{
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  }
+}
+```
 
-**Success Criteria:** Console shows "Seeded problem: Two Sum" with a UUID.
+**Run the seed:**
+```bash
+cd api
+npx prisma db seed
+```
+
+**Success Criteria:** Console shows all three seeded problems with their UUIDs.
 
 ---
 
-### Milestone 1.5 — Create Prisma Client Export
+### Milestone 1.5 — Create Database Client Singleton
 
-**What:** Create a reusable database client module.
+**What:** Create a properly typed, singleton Prisma client.
 
-**File: `api/src/db/client.js`**
-```javascript
-const { PrismaClient } = require('@prisma/client');
+**File: `api/src/config/database.ts`**
+```typescript
+import { PrismaClient } from '@prisma/client';
+import { env } from './env';
 
-const prisma = new PrismaClient();
+declare global {
+  // eslint-disable-next-line no-var
+  var prisma: PrismaClient | undefined;
+}
 
-module.exports = prisma;
+export const prisma =
+  global.prisma ||
+  new PrismaClient({
+    log: env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+  });
+
+if (env.NODE_ENV !== 'production') {
+  global.prisma = prisma;
+}
 ```
 
-**Success Criteria:** File exists and can be imported elsewhere.
+**Why the global pattern?** In development with hot-reloading (tsx watch), each reload creates a new PrismaClient instance. The global pattern ensures we reuse the same connection pool.
+
+**Success Criteria:** File compiles without errors.
 
 ---
 
@@ -541,276 +1194,638 @@ docker exec -it codeex-postgres psql -U codeex -d codeex -c "SELECT title FROM p
 
 ## Phase 2 — API Server Core
 
-**Goal:** Express server running with health check, CORS, and structured routing.
+**Goal:** Express server with TypeScript, proper layered architecture, and type-safe request handling.
 
-### Milestone 2.1 — Install Dependencies
+### Milestone 2.1 — Dependencies Already Installed
 
-**What:** Add all required packages for the API server.
+Dependencies were already defined in `package.json` during Phase 0. Run install if you haven't:
 
-**Steps:**
 ```bash
 cd api
-npm install express cors helmet dotenv jsonwebtoken bcryptjs bullmq socket.io ioredis uuid
-npm install --save-dev nodemon
+npm install
 ```
-
-**Package Purposes:**
-- `express` — HTTP server framework
-- `cors` — Cross-Origin Resource Sharing middleware
-- `helmet` — Security headers
-- `dotenv` — Environment variable loading
-- `jsonwebtoken` — JWT token creation/verification
-- `bcryptjs` — Password hashing
-- `bullmq` — Job queue library
-- `socket.io` — WebSocket server
-- `ioredis` — Redis client (required by BullMQ)
-- `uuid` — Generate unique IDs
-- `nodemon` — Auto-restart during development
-
-**Success Criteria:** All packages installed without errors.
 
 ---
 
-### Milestone 2.2 — Create Express App Entry Point
+### Milestone 2.2 — Create Utility Modules
 
-**What:** Set up the main Express application.
+**What:** Set up error classes and response helpers.
 
-**File: `api/src/index.js`**
-```javascript
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const http = require('http');
+**File: `api/src/utils/errors.ts`**
+```typescript
+export class AppError extends Error {
+  constructor(
+    public message: string,
+    public statusCode: number = 500,
+    public code?: string
+  ) {
+    super(message);
+    this.name = 'AppError';
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
 
-const app = express();
-const server = http.createServer(app);
+export class NotFoundError extends AppError {
+  constructor(message: string = 'Resource not found') {
+    super(message, 404, 'NOT_FOUND');
+  }
+}
 
-// Middleware
-app.use(helmet());
-app.use(cors());
-app.use(express.json());
+export class BadRequestError extends AppError {
+  constructor(message: string = 'Bad request') {
+    super(message, 400, 'BAD_REQUEST');
+  }
+}
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
+export class UnauthorizedError extends AppError {
+  constructor(message: string = 'Unauthorized') {
+    super(message, 401, 'UNAUTHORIZED');
+  }
+}
 
-// Routes will be added here
-// app.use('/api/auth', require('./routes/auth'));
-// app.use('/api/problems', require('./routes/problems'));
-// app.use('/api/submissions', require('./routes/submissions'));
+export class ForbiddenError extends AppError {
+  constructor(message: string = 'Forbidden') {
+    super(message, 403, 'FORBIDDEN');
+  }
+}
 
-// Error handler
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Internal server error' });
-});
-
-const PORT = process.env.PORT || 8080;
-
-server.listen(PORT, () => {
-  console.log(`API Server running on port ${PORT}`);
-});
-
-module.exports = { app, server };
-```
-
-**File: `api/package.json` (add scripts)**
-```json
-{
-  "scripts": {
-    "dev": "nodemon src/index.js",
-    "start": "node src/index.js"
+export class ConflictError extends AppError {
+  constructor(message: string = 'Resource already exists') {
+    super(message, 409, 'CONFLICT');
   }
 }
 ```
 
-**Steps:**
-1. Start the server:
-   ```bash
-   npm run dev
-   ```
-2. Test health endpoint:
-   ```bash
-   curl http://localhost:8080/health
-   ```
+**File: `api/src/utils/response.ts`**
+```typescript
+import { Response } from 'express';
 
-**Success Criteria:** Health check returns `{"status":"ok","timestamp":"..."}`.
+interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  code?: string;
+}
+
+export function sendSuccess<T>(res: Response, data: T, statusCode: number = 200): void {
+  const response: ApiResponse<T> = {
+    success: true,
+    data,
+  };
+  res.status(statusCode).json(response);
+}
+
+export function sendError(res: Response, message: string, statusCode: number = 500, code?: string): void {
+  const response: ApiResponse<null> = {
+    success: false,
+    error: message,
+    code,
+  };
+  res.status(statusCode).json(response);
+}
+
+export function sendCreated<T>(res: Response, data: T): void {
+  sendSuccess(res, data, 201);
+}
+
+export function sendAccepted<T>(res: Response, data: T): void {
+  sendSuccess(res, data, 202);
+}
+
+export function sendNoContent(res: Response): void {
+  res.status(204).send();
+}
+```
+
+**File: `api/src/utils/logger.ts`**
+```typescript
+import { env } from '../config/env';
+
+type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+const LOG_LEVELS: Record<LogLevel, number> = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+};
+
+const currentLevel = env.NODE_ENV === 'production' ? 'info' : 'debug';
+
+function shouldLog(level: LogLevel): boolean {
+  return LOG_LEVELS[level] >= LOG_LEVELS[currentLevel];
+}
+
+function formatMessage(level: LogLevel, message: string, meta?: object): string {
+  const timestamp = new Date().toISOString();
+  const metaStr = meta ? ` ${JSON.stringify(meta)}` : '';
+  return `[${timestamp}] [${level.toUpperCase()}] ${message}${metaStr}`;
+}
+
+export const logger = {
+  debug: (message: string, meta?: object) => {
+    if (shouldLog('debug')) console.debug(formatMessage('debug', message, meta));
+  },
+  info: (message: string, meta?: object) => {
+    if (shouldLog('info')) console.info(formatMessage('info', message, meta));
+  },
+  warn: (message: string, meta?: object) => {
+    if (shouldLog('warn')) console.warn(formatMessage('warn', message, meta));
+  },
+  error: (message: string, meta?: object) => {
+    if (shouldLog('error')) console.error(formatMessage('error', message, meta));
+  },
+};
+```
 
 ---
 
-### Milestone 2.3 — Create Auth Middleware
+### Milestone 2.3 — Create Type Definitions
 
-**What:** JWT verification middleware for protected routes.
+**What:** Define shared types used across the API.
 
-**File: `api/src/middleware/auth.js`**
-```javascript
-const jwt = require('jsonwebtoken');
+**File: `api/src/types/index.ts`**
+```typescript
+import { Request } from 'express';
 
-const authMiddleware = (req, res, next) => {
+export interface JwtPayload {
+  userId: string;
+  username: string;
+  iat?: number;
+  exp?: number;
+}
+
+export interface AuthenticatedRequest extends Request {
+  user: JwtPayload;
+}
+
+export interface PaginationQuery {
+  page?: string;
+  limit?: string;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+```
+
+**File: `api/src/types/submission.types.ts`**
+```typescript
+import { Language, Verdict, SubmissionStatus } from '@prisma/client';
+
+export interface CreateSubmissionDTO {
+  userId: string;
+  problemId: string;
+  language: Language;
+  code: string;
+}
+
+export interface SubmissionJobPayload {
+  submissionId: string;
+  userId: string;
+  problemId: string;
+  language: Language;
+  code: string;
+  testCases: TestCasePayload[];
+  timeLimitMs: number;
+  memoryLimitMb: number;
+}
+
+export interface TestCasePayload {
+  id: string;
+  input: string;
+  expectedOutput: string;
+}
+
+export interface SubmissionResult {
+  submissionId: string;
+  status: SubmissionStatus;
+  verdict: Verdict;
+  executionTimeMs: number;
+  passedCount: number;
+  totalCount: number;
+}
+```
+
+---
+
+### Milestone 2.4 — Create Middleware
+
+**What:** Auth, validation, and error handling middleware.
+
+**File: `api/src/middleware/auth.middleware.ts`**
+```typescript
+import { Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+import { env } from '../config/env';
+import { UnauthorizedError } from '../utils/errors';
+import { AuthenticatedRequest, JwtPayload } from '../types';
+
+export function authMiddleware(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'No token provided' });
+    throw new UnauthorizedError('No token provided');
   }
 
   const token = authHeader.split(' ')[1];
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
     req.user = decoded;
     next();
   } catch (error) {
-    return res.status(401).json({ error: 'Invalid token' });
+    throw new UnauthorizedError('Invalid or expired token');
   }
-};
-
-module.exports = authMiddleware;
+}
 ```
 
-**Success Criteria:** Middleware file created and exports a function.
+**File: `api/src/middleware/validate.middleware.ts`**
+```typescript
+import { Request, Response, NextFunction } from 'express';
+import { ZodSchema, ZodError } from 'zod';
+import { BadRequestError } from '../utils/errors';
+
+export function validate(schema: ZodSchema) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      schema.parse({
+        body: req.body,
+        query: req.query,
+        params: req.params,
+      });
+      next();
+    } catch (error) {
+      if (error instanceof ZodError) {
+        const messages = error.errors.map((e) => `${e.path.join('.')}: ${e.message}`);
+        throw new BadRequestError(messages.join(', '));
+      }
+      throw error;
+    }
+  };
+}
+```
+
+**File: `api/src/middleware/error.middleware.ts`**
+```typescript
+import { Request, Response, NextFunction } from 'express';
+import { AppError } from '../utils/errors';
+import { sendError } from '../utils/response';
+import { logger } from '../utils/logger';
+import { env } from '../config/env';
+
+export function errorMiddleware(
+  err: Error,
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  logger.error(err.message, {
+    stack: err.stack,
+    path: req.path,
+    method: req.method,
+  });
+
+  if (err instanceof AppError) {
+    sendError(res, err.message, err.statusCode, err.code);
+    return;
+  }
+
+  const message = env.NODE_ENV === 'production' 
+    ? 'Internal server error' 
+    : err.message;
+
+  sendError(res, message, 500, 'INTERNAL_ERROR');
+}
+```
+
+**File: `api/src/middleware/logger.middleware.ts`**
+```typescript
+import { Request, Response, NextFunction } from 'express';
+import { logger } from '../utils/logger';
+
+export function loggerMiddleware(req: Request, res: Response, next: NextFunction): void {
+  const start = Date.now();
+
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    logger.info(`${req.method} ${req.path}`, {
+      status: res.statusCode,
+      duration: `${duration}ms`,
+    });
+  });
+
+  next();
+}
+```
 
 ---
 
-### Milestone 2.4 — Create Auth Routes
+### Milestone 2.5 — Create Express App
 
-**What:** Register and login endpoints.
+**What:** Configure Express with middleware and routes.
 
-**File: `api/src/routes/auth.js`**
-```javascript
-const express = require('express');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const prisma = require('../db/client');
+**File: `api/src/app.ts`**
+```typescript
+import express, { Application } from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import { loggerMiddleware } from './middleware/logger.middleware';
+import { errorMiddleware } from './middleware/error.middleware';
+import routes from './routes';
 
-const router = express.Router();
+export function createApp(): Application {
+  const app = express();
 
-// POST /api/auth/register
-router.post('/register', async (req, res) => {
+  // Security middleware
+  app.use(helmet());
+  app.use(cors());
+
+  // Body parsing
+  app.use(express.json({ limit: '1mb' }));
+  app.use(express.urlencoded({ extended: true }));
+
+  // Request logging
+  app.use(loggerMiddleware);
+
+  // Health check (outside /api for load balancer)
+  app.get('/health', (req, res) => {
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+    });
+  });
+
+  // API routes
+  app.use('/api', routes);
+
+  // 404 handler
+  app.use((req, res) => {
+    res.status(404).json({
+      success: false,
+      error: 'Endpoint not found',
+      code: 'NOT_FOUND',
+    });
+  });
+
+  // Error handler (must be last)
+  app.use(errorMiddleware);
+
+  return app;
+}
+```
+
+**File: `api/src/server.ts`**
+```typescript
+import http from 'http';
+import { Application } from 'express';
+import { Server as SocketServer } from 'socket.io';
+import { setupWebSocket } from './websocket';
+import { logger } from './utils/logger';
+
+export function createServer(app: Application): http.Server {
+  const server = http.createServer(app);
+  return server;
+}
+
+export async function startServer(
+  server: http.Server,
+  port: number
+): Promise<SocketServer> {
+  const io = await setupWebSocket(server);
+
+  return new Promise((resolve) => {
+    server.listen(port, () => {
+      logger.info(`API Server running on port ${port}`);
+      logger.info(`WebSocket server ready`);
+      resolve(io);
+    });
+  });
+}
+```
+
+**File: `api/src/index.ts`**
+```typescript
+import { env } from './config/env';
+import { createApp } from './app';
+import { createServer, startServer } from './server';
+import { prisma } from './config/database';
+import { logger } from './utils/logger';
+
+async function main(): Promise<void> {
   try {
-    const { username, email, password } = req.body;
+    // Test database connection
+    await prisma.$connect();
+    logger.info('Database connected');
 
-    // Validation
-    if (!username || !email || !password) {
-      return res.status(400).json({ error: 'All fields are required' });
-    }
+    // Create and start server
+    const app = createApp();
+    const server = createServer(app);
+    await startServer(server, env.PORT);
 
-    // Check if user exists
-    const existingUser = await prisma.user.findFirst({
+    // Graceful shutdown
+    const shutdown = async (signal: string) => {
+      logger.info(`${signal} received, shutting down gracefully`);
+      server.close(() => {
+        logger.info('HTTP server closed');
+      });
+      await prisma.$disconnect();
+      logger.info('Database disconnected');
+      process.exit(0);
+    };
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
+  } catch (error) {
+    logger.error('Failed to start server', { error });
+    process.exit(1);
+  }
+}
+
+main();
+```
+
+---
+
+### Milestone 2.6 — Create Route Structure
+
+**What:** Set up route aggregator and placeholder routes.
+
+**File: `api/src/routes/index.ts`**
+```typescript
+import { Router } from 'express';
+import authRoutes from './auth.routes';
+import problemRoutes from './problem.routes';
+import submissionRoutes from './submission.routes';
+
+const router = Router();
+
+router.use('/auth', authRoutes);
+router.use('/problems', problemRoutes);
+router.use('/submissions', submissionRoutes);
+
+export default router;
+```
+
+**File: `api/src/routes/auth.routes.ts`**
+```typescript
+import { Router } from 'express';
+import { AuthController } from '../controllers/auth.controller';
+import { validate } from '../middleware/validate.middleware';
+import { registerSchema, loginSchema } from '../validators/auth.validator';
+
+const router = Router();
+const authController = new AuthController();
+
+router.post('/register', validate(registerSchema), authController.register);
+router.post('/login', validate(loginSchema), authController.login);
+
+export default router;
+```
+
+**File: `api/src/routes/problem.routes.ts`**
+```typescript
+import { Router } from 'express';
+import { ProblemController } from '../controllers/problem.controller';
+
+const router = Router();
+const problemController = new ProblemController();
+
+router.get('/', problemController.getAll);
+router.get('/:id', problemController.getById);
+
+export default router;
+```
+
+**File: `api/src/routes/submission.routes.ts`**
+```typescript
+import { Router } from 'express';
+import { SubmissionController } from '../controllers/submission.controller';
+import { authMiddleware } from '../middleware/auth.middleware';
+import { validate } from '../middleware/validate.middleware';
+import { createSubmissionSchema } from '../validators/submission.validator';
+
+const router = Router();
+const submissionController = new SubmissionController();
+
+router.use(authMiddleware as any); // All submission routes require auth
+
+router.post('/', validate(createSubmissionSchema), submissionController.create);
+router.get('/', submissionController.getAll);
+router.get('/:id', submissionController.getById);
+
+export default router;
+```
+
+**Success Criteria:** `npm run dev` starts without TypeScript errors.
+
+---
+
+### Milestone 2.7 — Create Validators (Zod Schemas)
+
+**What:** Type-safe request validation with Zod.
+
+**File: `api/src/validators/auth.validator.ts`**
+```typescript
+import { z } from 'zod';
+
+export const registerSchema = z.object({
+  body: z.object({
+    username: z.string().min(3).max(30).regex(/^[a-zA-Z0-9_]+$/, {
+      message: 'Username can only contain letters, numbers, and underscores',
+    }),
+    email: z.string().email(),
+    password: z.string().min(8).max(100),
+  }),
+});
+
+export const loginSchema = z.object({
+  body: z.object({
+    email: z.string().email(),
+    password: z.string().min(1),
+  }),
+});
+
+export type RegisterInput = z.infer<typeof registerSchema>['body'];
+export type LoginInput = z.infer<typeof loginSchema>['body'];
+```
+
+**File: `api/src/validators/submission.validator.ts`**
+```typescript
+import { z } from 'zod';
+import { Language } from '@prisma/client';
+
+export const createSubmissionSchema = z.object({
+  body: z.object({
+    problemId: z.string().uuid(),
+    language: z.nativeEnum(Language),
+    code: z.string().min(1).max(50000),
+  }),
+});
+
+export type CreateSubmissionInput = z.infer<typeof createSubmissionSchema>['body'];
+```
+
+---
+
+### Milestone 2.8 — Create Repositories (Data Access Layer)
+
+**What:** Isolated database queries, single responsibility.
+
+**File: `api/src/repositories/user.repository.ts`**
+```typescript
+import { Prisma, User } from '@prisma/client';
+import { prisma } from '../config/database';
+
+export class UserRepository {
+  async findById(id: string): Promise<User | null> {
+    return prisma.user.findUnique({ where: { id } });
+  }
+
+  async findByEmail(email: string): Promise<User | null> {
+    return prisma.user.findUnique({ where: { email } });
+  }
+
+  async findByUsername(username: string): Promise<User | null> {
+    return prisma.user.findUnique({ where: { username } });
+  }
+
+  async findByEmailOrUsername(email: string, username: string): Promise<User | null> {
+    return prisma.user.findFirst({
       where: {
         OR: [{ email }, { username }],
       },
     });
-
-    if (existingUser) {
-      return res.status(400).json({ error: 'User already exists' });
-    }
-
-    // Hash password
-    const passwordHash = await bcrypt.hash(password, 10);
-
-    // Create user
-    const user = await prisma.user.create({
-      data: {
-        username,
-        email,
-        passwordHash,
-      },
-    });
-
-    // Generate token
-    const token = jwt.sign(
-      { userId: user.id, username: user.username },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    res.status(201).json({
-      message: 'User created successfully',
-      token,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-      },
-    });
-  } catch (error) {
-    console.error('Register error:', error);
-    res.status(500).json({ error: 'Registration failed' });
   }
-});
 
-// POST /api/auth/login
-router.post('/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    // Validation
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password required' });
-    }
-
-    // Find user
-    const user = await prisma.user.findUnique({
-      where: { email },
-    });
-
-    if (!user) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    // Check password
-    const validPassword = await bcrypt.compare(password, user.passwordHash);
-
-    if (!validPassword) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    // Generate token
-    const token = jwt.sign(
-      { userId: user.id, username: user.username },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    res.json({
-      message: 'Login successful',
-      token,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-      },
-    });
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ error: 'Login failed' });
+  async create(data: Prisma.UserCreateInput): Promise<User> {
+    return prisma.user.create({ data });
   }
-});
+}
 
-module.exports = router;
+export const userRepository = new UserRepository();
 ```
 
-**Success Criteria:** Register and login endpoints work via curl/Postman.
+**File: `api/src/repositories/problem.repository.ts`**
+```typescript
+import { Problem, TestCase } from '@prisma/client';
+import { prisma } from '../config/database';
 
----
+export type ProblemWithTestCases = Problem & { testCases: TestCase[] };
+export type ProblemWithSampleTestCases = Problem & { testCases: Pick<TestCase, 'id' | 'input' | 'expectedOutput'>[] };
 
-### Milestone 2.5 — Create Problems Routes
-
-**What:** Endpoints to list and view coding problems.
-
-**File: `api/src/routes/problems.js`**
-```javascript
-const express = require('express');
-const prisma = require('../db/client');
-
-const router = express.Router();
-
-// GET /api/problems - List all problems
-router.get('/', async (req, res) => {
-  try {
-    const problems = await prisma.problem.findMany({
+export class ProblemRepository {
+  async findAll(): Promise<Pick<Problem, 'id' | 'title' | 'difficulty' | 'createdAt'>[]> {
+    return prisma.problem.findMany({
       select: {
         id: true,
         title: true,
@@ -819,20 +1834,14 @@ router.get('/', async (req, res) => {
       },
       orderBy: { createdAt: 'desc' },
     });
-
-    res.json(problems);
-  } catch (error) {
-    console.error('List problems error:', error);
-    res.status(500).json({ error: 'Failed to fetch problems' });
   }
-});
 
-// GET /api/problems/:id - Get problem details with sample test cases
-router.get('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
+  async findById(id: string): Promise<Problem | null> {
+    return prisma.problem.findUnique({ where: { id } });
+  }
 
-    const problem = await prisma.problem.findUnique({
+  async findByIdWithSampleTestCases(id: string): Promise<ProblemWithSampleTestCases | null> {
+    return prisma.problem.findUnique({
       where: { id },
       include: {
         testCases: {
@@ -845,132 +1854,229 @@ router.get('/:id', async (req, res) => {
         },
       },
     });
-
-    if (!problem) {
-      return res.status(404).json({ error: 'Problem not found' });
-    }
-
-    res.json(problem);
-  } catch (error) {
-    console.error('Get problem error:', error);
-    res.status(500).json({ error: 'Failed to fetch problem' });
   }
-});
 
-module.exports = router;
-```
-
-**Success Criteria:** GET `/api/problems` returns the seeded problem list.
-
----
-
-### Milestone 2.6 — Create BullMQ Producer
-
-**What:** Module to add jobs to the execution queue.
-
-**File: `api/src/queue/producer.js`**
-```javascript
-const { Queue } = require('bullmq');
-const IORedis = require('ioredis');
-
-const connection = new IORedis(process.env.REDIS_URL, {
-  maxRetriesPerRequest: null,
-});
-
-const executionQueue = new Queue('code-execution', { connection });
-
-async function addExecutionJob(data) {
-  const job = await executionQueue.add('execute', data, {
-    attempts: 3,
-    backoff: {
-      type: 'exponential',
-      delay: 1000,
-    },
-    removeOnComplete: 100,
-    removeOnFail: 100,
-  });
-
-  return job.id;
+  async findByIdWithAllTestCases(id: string): Promise<ProblemWithTestCases | null> {
+    return prisma.problem.findUnique({
+      where: { id },
+      include: { testCases: true },
+    });
+  }
 }
 
-module.exports = { executionQueue, addExecutionJob };
+export const problemRepository = new ProblemRepository();
 ```
 
-**Job Data Structure:**
-```javascript
-{
-  submissionId: 'uuid',
-  userId: 'uuid',
-  problemId: 'uuid',
-  language: 'PYTHON3',
-  code: 'print(input())',
-  testCases: [
-    { id: 'tc-1', input: 'hello', expectedOutput: 'hello' }
-  ],
-  timeLimitMs: 2000,
-  memoryLimitMb: 256
-}
-```
+**File: `api/src/repositories/submission.repository.ts`**
+```typescript
+import { Prisma, Submission, SubmissionStatus, Verdict } from '@prisma/client';
+import { prisma } from '../config/database';
 
-**Success Criteria:** Module exports `addExecutionJob` function.
+export class SubmissionRepository {
+  async findById(id: string): Promise<Submission | null> {
+    return prisma.submission.findUnique({ where: { id } });
+  }
 
----
-
-### Milestone 2.7 — Create Submissions Routes
-
-**What:** Submit code endpoint that queues the job.
-
-**File: `api/src/routes/submissions.js`**
-```javascript
-const express = require('express');
-const prisma = require('../db/client');
-const authMiddleware = require('../middleware/auth');
-const { addExecutionJob } = require('../queue/producer');
-
-const router = express.Router();
-
-// POST /api/submissions - Submit code for execution
-router.post('/', authMiddleware, async (req, res) => {
-  try {
-    const { problemId, language, code } = req.body;
-    const userId = req.user.userId;
-
-    // Validation
-    if (!problemId || !language || !code) {
-      return res.status(400).json({ error: 'problemId, language, and code are required' });
-    }
-
-    // Validate language
-    const validLanguages = ['PYTHON3', 'JAVA'];
-    if (!validLanguages.includes(language)) {
-      return res.status(400).json({ error: `Invalid language. Must be one of: ${validLanguages.join(', ')}` });
-    }
-
-    // Fetch problem with ALL test cases (not just samples)
-    const problem = await prisma.problem.findUnique({
-      where: { id: problemId },
+  async findByIdWithProblem(id: string) {
+    return prisma.submission.findUnique({
+      where: { id },
       include: {
-        testCases: true,
+        problem: { select: { title: true } },
       },
     });
+  }
 
-    if (!problem) {
-      return res.status(404).json({ error: 'Problem not found' });
+  async findByUserId(userId: string, limit: number = 50) {
+    return prisma.submission.findMany({
+      where: { userId },
+      include: {
+        problem: { select: { title: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+  }
+
+  async create(data: Prisma.SubmissionUncheckedCreateInput): Promise<Submission> {
+    return prisma.submission.create({ data });
+  }
+
+  async updateStatus(id: string, status: SubmissionStatus): Promise<Submission> {
+    return prisma.submission.update({
+      where: { id },
+      data: { status },
+    });
+  }
+
+  async updateResult(
+    id: string,
+    data: {
+      status: SubmissionStatus;
+      verdict: Verdict;
+      executionTimeMs?: number;
+      memoryUsedMb?: number;
+      stdout?: string;
+      stderr?: string;
+    }
+  ): Promise<Submission> {
+    return prisma.submission.update({
+      where: { id },
+      data,
+    });
+  }
+}
+
+export const submissionRepository = new SubmissionRepository();
+```
+
+---
+
+### Milestone 2.9 — Create Services (Business Logic)
+
+**What:** Core business logic, framework-agnostic.
+
+**File: `api/src/services/auth.service.ts`**
+```typescript
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { User } from '@prisma/client';
+import { env } from '../config/env';
+import { userRepository } from '../repositories/user.repository';
+import { ConflictError, UnauthorizedError } from '../utils/errors';
+import { JwtPayload } from '../types';
+import { RegisterInput, LoginInput } from '../validators/auth.validator';
+
+export interface AuthResult {
+  token: string;
+  user: {
+    id: string;
+    username: string;
+    email: string;
+  };
+}
+
+export class AuthService {
+  async register(input: RegisterInput): Promise<AuthResult> {
+    const { username, email, password } = input;
+
+    const existingUser = await userRepository.findByEmailOrUsername(email, username);
+    if (existingUser) {
+      throw new ConflictError('User with this email or username already exists');
     }
 
-    // Create submission in PENDING state
-    const submission = await prisma.submission.create({
-      data: {
-        userId,
-        problemId,
-        language,
-        code,
-        status: 'PENDING',
-      },
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    const user = await userRepository.create({
+      username,
+      email,
+      passwordHash,
     });
 
-    // Queue the job
-    const jobId = await addExecutionJob({
+    const token = this.generateToken(user);
+
+    return {
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+      },
+    };
+  }
+
+  async login(input: LoginInput): Promise<AuthResult> {
+    const { email, password } = input;
+
+    const user = await userRepository.findByEmail(email);
+    if (!user) {
+      throw new UnauthorizedError('Invalid email or password');
+    }
+
+    const isValidPassword = await bcrypt.compare(password, user.passwordHash);
+    if (!isValidPassword) {
+      throw new UnauthorizedError('Invalid email or password');
+    }
+
+    const token = this.generateToken(user);
+
+    return {
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+      },
+    };
+  }
+
+  private generateToken(user: User): string {
+    const payload: JwtPayload = {
+      userId: user.id,
+      username: user.username,
+    };
+
+    return jwt.sign(payload, env.JWT_SECRET, {
+      expiresIn: env.JWT_EXPIRES_IN,
+    });
+  }
+}
+
+export const authService = new AuthService();
+```
+
+**File: `api/src/services/problem.service.ts`**
+```typescript
+import { problemRepository, ProblemWithSampleTestCases } from '../repositories/problem.repository';
+import { NotFoundError } from '../utils/errors';
+
+export class ProblemService {
+  async getAllProblems() {
+    return problemRepository.findAll();
+  }
+
+  async getProblemById(id: string): Promise<ProblemWithSampleTestCases> {
+    const problem = await problemRepository.findByIdWithSampleTestCases(id);
+    if (!problem) {
+      throw new NotFoundError('Problem not found');
+    }
+    return problem;
+  }
+}
+
+export const problemService = new ProblemService();
+```
+
+**File: `api/src/services/submission.service.ts`**
+```typescript
+import { Submission } from '@prisma/client';
+import { submissionRepository } from '../repositories/submission.repository';
+import { problemRepository } from '../repositories/problem.repository';
+import { queueService } from './queue.service';
+import { NotFoundError, ForbiddenError } from '../utils/errors';
+import { CreateSubmissionInput } from '../validators/submission.validator';
+import { SubmissionJobPayload } from '../types/submission.types';
+
+export class SubmissionService {
+  async createSubmission(
+    userId: string,
+    input: CreateSubmissionInput
+  ): Promise<{ submissionId: string; jobId: string }> {
+    const { problemId, language, code } = input;
+
+    const problem = await problemRepository.findByIdWithAllTestCases(problemId);
+    if (!problem) {
+      throw new NotFoundError('Problem not found');
+    }
+
+    const submission = await submissionRepository.create({
+      userId,
+      problemId,
+      language,
+      code,
+      status: 'PENDING',
+    });
+
+    const jobPayload: SubmissionJobPayload = {
       submissionId: submission.id,
       userId,
       problemId,
@@ -983,96 +2089,207 @@ router.post('/', authMiddleware, async (req, res) => {
       })),
       timeLimitMs: problem.timeLimitMs,
       memoryLimitMb: problem.memoryLimitMb,
-    });
+    };
 
-    res.status(202).json({
-      message: 'Submission received',
-      submissionId: submission.id,
-      jobId,
-    });
-  } catch (error) {
-    console.error('Submission error:', error);
-    res.status(500).json({ error: 'Submission failed' });
+    const jobId = await queueService.addExecutionJob(jobPayload);
+
+    return { submissionId: submission.id, jobId };
   }
-});
 
-// GET /api/submissions/:id - Get submission status
-router.get('/:id', authMiddleware, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const userId = req.user.userId;
-
-    const submission = await prisma.submission.findFirst({
-      where: {
-        id,
-        userId,
-      },
-      include: {
-        problem: {
-          select: {
-            title: true,
-          },
-        },
-      },
-    });
-
+  async getSubmissionById(userId: string, submissionId: string) {
+    const submission = await submissionRepository.findByIdWithProblem(submissionId);
     if (!submission) {
-      return res.status(404).json({ error: 'Submission not found' });
+      throw new NotFoundError('Submission not found');
     }
 
-    res.json(submission);
-  } catch (error) {
-    console.error('Get submission error:', error);
-    res.status(500).json({ error: 'Failed to fetch submission' });
+    if (submission.userId !== userId) {
+      throw new ForbiddenError('You do not have access to this submission');
+    }
+
+    return submission;
   }
-});
 
-// GET /api/submissions - List user's submissions
-router.get('/', authMiddleware, async (req, res) => {
-  try {
-    const userId = req.user.userId;
-
-    const submissions = await prisma.submission.findMany({
-      where: { userId },
-      include: {
-        problem: {
-          select: {
-            title: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    });
-
-    res.json(submissions);
-  } catch (error) {
-    console.error('List submissions error:', error);
-    res.status(500).json({ error: 'Failed to fetch submissions' });
+  async getUserSubmissions(userId: string) {
+    return submissionRepository.findByUserId(userId);
   }
-});
+}
 
-module.exports = router;
+export const submissionService = new SubmissionService();
 ```
 
-**Success Criteria:** POST `/api/submissions` creates a submission and returns 202.
+**File: `api/src/services/queue.service.ts`**
+```typescript
+import { Queue } from 'bullmq';
+import { redis } from '../config/redis';
+import { SubmissionJobPayload } from '../types/submission.types';
+
+const QUEUE_NAME = 'code-execution';
+
+export class QueueService {
+  private queue: Queue;
+
+  constructor() {
+    this.queue = new Queue(QUEUE_NAME, {
+      connection: redis,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 1000,
+        },
+        removeOnComplete: 100,
+        removeOnFail: 100,
+      },
+    });
+  }
+
+  async addExecutionJob(payload: SubmissionJobPayload): Promise<string> {
+    const job = await this.queue.add('execute', payload);
+    return job.id || 'unknown';
+  }
+
+  async getQueueStats() {
+    const [waiting, active, completed, failed] = await Promise.all([
+      this.queue.getWaitingCount(),
+      this.queue.getActiveCount(),
+      this.queue.getCompletedCount(),
+      this.queue.getFailedCount(),
+    ]);
+
+    return { waiting, active, completed, failed };
+  }
+}
+
+export const queueService = new QueueService();
+```
+
+**File: `api/src/config/redis.ts`**
+```typescript
+import IORedis from 'ioredis';
+import { env } from './env';
+
+export const redis = new IORedis(env.REDIS_URL, {
+  maxRetriesPerRequest: null,
+});
+
+redis.on('connect', () => {
+  console.log('Redis connected');
+});
+
+redis.on('error', (err) => {
+  console.error('Redis error:', err);
+});
+```
 
 ---
 
-### Milestone 2.8 — Wire Up All Routes
+### Milestone 2.10 — Create Controllers (HTTP Handlers)
 
-**What:** Connect all routes to the Express app.
+**What:** Thin layer that handles HTTP, delegates to services.
 
-**Update: `api/src/index.js`**
-```javascript
-// Add these lines after middleware setup, before error handler:
+**File: `api/src/controllers/auth.controller.ts`**
+```typescript
+import { Request, Response, NextFunction } from 'express';
+import { authService } from '../services/auth.service';
+import { sendSuccess, sendCreated } from '../utils/response';
+import { RegisterInput, LoginInput } from '../validators/auth.validator';
 
-app.use('/api/auth', require('./routes/auth'));
-app.use('/api/problems', require('./routes/problems'));
-app.use('/api/submissions', require('./routes/submissions'));
+export class AuthController {
+  async register(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const input: RegisterInput = req.body;
+      const result = await authService.register(input);
+      sendCreated(res, result);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async login(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const input: LoginInput = req.body;
+      const result = await authService.login(input);
+      sendSuccess(res, result);
+    } catch (error) {
+      next(error);
+    }
+  }
+}
 ```
 
-**Success Criteria:** All routes respond correctly.
+**File: `api/src/controllers/problem.controller.ts`**
+```typescript
+import { Request, Response, NextFunction } from 'express';
+import { problemService } from '../services/problem.service';
+import { sendSuccess } from '../utils/response';
+
+export class ProblemController {
+  async getAll(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const problems = await problemService.getAllProblems();
+      sendSuccess(res, problems);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getById(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { id } = req.params;
+      const problem = await problemService.getProblemById(id);
+      sendSuccess(res, problem);
+    } catch (error) {
+      next(error);
+    }
+  }
+}
+```
+
+**File: `api/src/controllers/submission.controller.ts`**
+```typescript
+import { Response, NextFunction } from 'express';
+import { submissionService } from '../services/submission.service';
+import { sendSuccess, sendAccepted } from '../utils/response';
+import { AuthenticatedRequest } from '../types';
+import { CreateSubmissionInput } from '../validators/submission.validator';
+
+export class SubmissionController {
+  async create(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const userId = req.user.userId;
+      const input: CreateSubmissionInput = req.body;
+      const result = await submissionService.createSubmission(userId, input);
+      sendAccepted(res, {
+        message: 'Submission queued for execution',
+        ...result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getById(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const userId = req.user.userId;
+      const { id } = req.params;
+      const submission = await submissionService.getSubmissionById(userId, id);
+      sendSuccess(res, submission);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getAll(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const userId = req.user.userId;
+      const submissions = await submissionService.getUserSubmissions(userId);
+      sendSuccess(res, submissions);
+    } catch (error) {
+      next(error);
+    }
+  }
+}
+```
 
 ---
 
@@ -1080,29 +2297,83 @@ app.use('/api/submissions', require('./routes/submissions'));
 
 Test the complete API:
 ```bash
-# 1. Health check
+# 1. Start services
+docker compose up -d
+cd api && npm run dev
+
+# 2. Health check
 curl http://localhost:8080/health
 
-# 2. Register a user
+# 3. Register a user
 curl -X POST http://localhost:8080/api/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"username":"testuser","email":"test@test.com","password":"password123"}'
+  -d '{"username":"testuser","email":"test@example.com","password":"password123456"}'
 
-# Save the token from the response
+# Save the token from the response, e.g.:
+# TOKEN="eyJhbGciOiJIUzI1..."
 
-# 3. List problems
+# 4. List problems
 curl http://localhost:8080/api/problems
 
-# 4. Get problem details
+# 5. Get problem details (replace <problem-id>)
 curl http://localhost:8080/api/problems/<problem-id>
 
-# 5. Submit code (replace <token> and <problem-id>)
+# 6. Submit code (replace <token> and <problem-id>)
 curl -X POST http://localhost:8080/api/submissions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
-  -d '{"problemId":"<problem-id>","language":"PYTHON3","code":"nums = list(map(int, input().split()))\ntarget = int(input())\nfor i in range(len(nums)):\n    for j in range(i+1, len(nums)):\n        if nums[i] + nums[j] == target:\n            print(i, j)\n            break"}'
+  -d '{
+    "problemId": "<problem-id>",
+    "language": "PYTHON3",
+    "code": "nums = list(map(int, input().split()))\ntarget = int(input())\nfor i in range(len(nums)):\n    for j in range(i+1, len(nums)):\n        if nums[i] + nums[j] == target:\n            print(i, j)\n            break"
+  }'
 
 # Should return 202 with submissionId
+```
+
+**All Phase 2 files created:**
+```
+api/src/
+├── index.ts                    # Entry point
+├── app.ts                      # Express app
+├── server.ts                   # HTTP + WS server
+├── config/
+│   ├── env.ts                  # Environment validation
+│   ├── database.ts             # Prisma client
+│   └── redis.ts                # Redis client
+├── types/
+│   ├── index.ts                # Shared types
+│   └── submission.types.ts     # Submission types
+├── routes/
+│   ├── index.ts                # Route aggregator
+│   ├── auth.routes.ts
+│   ├── problem.routes.ts
+│   └── submission.routes.ts
+├── controllers/
+│   ├── auth.controller.ts
+│   ├── problem.controller.ts
+│   └── submission.controller.ts
+├── services/
+│   ├── auth.service.ts
+│   ├── problem.service.ts
+│   ├── submission.service.ts
+│   └── queue.service.ts
+├── repositories/
+│   ├── user.repository.ts
+│   ├── problem.repository.ts
+│   └── submission.repository.ts
+├── middleware/
+│   ├── auth.middleware.ts
+│   ├── validate.middleware.ts
+│   ├── error.middleware.ts
+│   └── logger.middleware.ts
+├── validators/
+│   ├── auth.validator.ts
+│   └── submission.validator.ts
+└── utils/
+    ├── errors.ts
+    ├── response.ts
+    └── logger.ts
 ```
 
 ---
@@ -1224,53 +2495,291 @@ docker images | grep codeex
 
 ---
 
-## Phase 4 — Execution Worker
+## Phase 4 — Execution Worker (TypeScript)
 
 **Goal:** Worker service that pulls jobs from queue, executes code in Docker, and grades output.
 
-### Milestone 4.1 — Install Worker Dependencies
+### Milestone 4.1 — Setup Worker Project
 
-**What:** Add required packages for the worker service.
+**What:** Configure TypeScript worker with dependencies.
 
-**Steps:**
+Dependencies were defined in `package.json` during Phase 0. Install and set up Prisma:
+
 ```bash
 cd worker
-npm install bullmq ioredis dockerode dotenv @prisma/client
-npm install --save-dev nodemon
-```
+npm install
 
-**Package Purposes:**
-- `bullmq` — Job queue consumer
-- `ioredis` — Redis client
-- `dockerode` — Docker API client for Node.js
-- `dotenv` — Environment variables
-- `@prisma/client` — Database access
-
-**Copy Prisma schema to worker:**
-```bash
+# Copy Prisma schema from API and generate client
 cp -r ../api/prisma ./prisma
 npx prisma generate
 ```
 
-**Success Criteria:** All packages installed.
+**Success Criteria:** `npm run type-check` passes.
 
 ---
 
-### Milestone 4.2 — Create Docker Executor
+### Milestone 4.2 — Create Worker Configuration
 
-**What:** Module that runs code inside a Docker container.
+**What:** Set up typed configuration for the worker.
 
-**File: `worker/src/executor/docker.js`**
-```javascript
-const Docker = require('dockerode');
-const fs = require('fs').promises;
-const path = require('path');
-const os = require('os');
-const { v4: uuidv4 } = require('uuid');
+**File: `worker/src/config/env.ts`**
+```typescript
+import { z } from 'zod';
+import dotenv from 'dotenv';
 
-const docker = new Docker();
+dotenv.config();
 
-const LANGUAGE_CONFIG = {
+const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  DATABASE_URL: z.string(),
+  REDIS_URL: z.string(),
+  DOCKER_SOCKET_PATH: z.string().default('/var/run/docker.sock'),
+  WORKER_CONCURRENCY: z.string().transform(Number).default('2'),
+});
+
+const parsed = envSchema.safeParse(process.env);
+
+if (!parsed.success) {
+  console.error('Invalid environment variables:', parsed.error.flatten().fieldErrors);
+  process.exit(1);
+}
+
+export const env = parsed.data;
+```
+
+**File: `worker/src/config/database.ts`**
+```typescript
+import { PrismaClient } from '@prisma/client';
+import { env } from './env';
+
+export const prisma = new PrismaClient({
+  log: env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
+});
+```
+
+**File: `worker/src/config/redis.ts`**
+```typescript
+import IORedis from 'ioredis';
+import { env } from './env';
+
+export const redis = new IORedis(env.REDIS_URL, {
+  maxRetriesPerRequest: null,
+});
+
+export const publisher = new IORedis(env.REDIS_URL);
+```
+
+**File: `worker/src/config/docker.ts`**
+```typescript
+import Docker from 'dockerode';
+import { env } from './env';
+
+export const docker = new Docker({
+  socketPath: env.DOCKER_SOCKET_PATH,
+});
+```
+
+---
+
+### Milestone 4.3 — Create Type Definitions
+
+**What:** Define types for job payloads and execution results.
+
+**File: `worker/src/types/job.types.ts`**
+```typescript
+import { Language } from '@prisma/client';
+
+export interface ExecutionJobPayload {
+  submissionId: string;
+  userId: string;
+  problemId: string;
+  language: Language;
+  code: string;
+  testCases: TestCasePayload[];
+  timeLimitMs: number;
+  memoryLimitMb: number;
+}
+
+export interface TestCasePayload {
+  id: string;
+  input: string;
+  expectedOutput: string;
+}
+```
+
+**File: `worker/src/types/execution.types.ts`**
+```typescript
+import { Verdict } from '@prisma/client';
+
+export interface ExecutionResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  executionTimeMs: number;
+  timedOut: boolean;
+  compilationError: boolean;
+}
+
+export interface TestCaseResult extends ExecutionResult {
+  testCaseId: string;
+  passed: boolean;
+}
+
+export interface SubmissionResult {
+  submissionId: string;
+  status: 'COMPLETED';
+  verdict: Verdict;
+  executionTimeMs: number;
+  passedCount: number;
+  totalCount: number;
+}
+
+export interface LanguageConfig {
+  image: string;
+  fileName: string;
+  compileCmd: string[] | null;
+  runCmd: string[];
+}
+```
+
+---
+
+### Milestone 4.4 — Create Sandbox Container Manager
+
+**What:** Module that manages Docker container lifecycle.
+
+**File: `worker/src/sandbox/container.ts`**
+```typescript
+import Docker, { Container } from 'dockerode';
+import { docker } from '../config/docker';
+
+interface ContainerOptions {
+  image: string;
+  cmd: string[];
+  binds: string[];
+  memoryMb: number;
+  timeoutMs: number;
+  workingDir?: string;
+}
+
+interface ContainerResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  timedOut: boolean;
+}
+
+export async function runContainer(options: ContainerOptions): Promise<ContainerResult> {
+  const { image, cmd, binds, memoryMb, timeoutMs, workingDir = '/app' } = options;
+
+  let container: Container | null = null;
+  let timeoutHandle: NodeJS.Timeout | null = null;
+  let timedOut = false;
+
+  try {
+    container = await docker.createContainer({
+      Image: image,
+      Cmd: cmd,
+      WorkingDir: workingDir,
+      User: '1000:1000',
+      HostConfig: {
+        Binds: binds,
+        Memory: memoryMb * 1024 * 1024,
+        MemorySwap: memoryMb * 1024 * 1024,
+        CpuPeriod: 100000,
+        CpuQuota: 50000,
+        NetworkMode: 'none',
+        PidsLimit: 50,
+        ReadonlyRootfs: false,
+      },
+      AttachStdout: true,
+      AttachStderr: true,
+    });
+
+    timeoutHandle = setTimeout(async () => {
+      timedOut = true;
+      try {
+        if (container) await container.kill();
+      } catch {
+        // Container might have already finished
+      }
+    }, timeoutMs);
+
+    await container.start();
+    const waitResult = await container.wait();
+
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+
+    const logs = await container.logs({ stdout: true, stderr: true });
+    const output = parseDockerLogs(logs as Buffer);
+
+    return {
+      stdout: output.stdout,
+      stderr: output.stderr,
+      exitCode: waitResult.StatusCode,
+      timedOut,
+    };
+  } catch (error) {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+    return {
+      stdout: '',
+      stderr: error instanceof Error ? error.message : 'Unknown error',
+      exitCode: 1,
+      timedOut,
+    };
+  } finally {
+    if (container) {
+      try {
+        await container.remove({ force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }
+}
+
+function parseDockerLogs(buffer: Buffer): { stdout: string; stderr: string } {
+  let stdout = '';
+  let stderr = '';
+  let offset = 0;
+
+  while (offset < buffer.length) {
+    if (offset + 8 > buffer.length) break;
+
+    const streamType = buffer[offset];
+    const size = buffer.readUInt32BE(offset + 4);
+
+    if (offset + 8 + size > buffer.length) break;
+
+    const data = buffer.slice(offset + 8, offset + 8 + size).toString('utf8');
+
+    if (streamType === 1) stdout += data;
+    else if (streamType === 2) stderr += data;
+
+    offset += 8 + size;
+  }
+
+  return { stdout, stderr };
+}
+```
+
+---
+
+### Milestone 4.5 — Create Executor
+
+**What:** Language-specific code execution logic.
+
+**File: `worker/src/executor/index.ts`**
+```typescript
+import fs from 'fs/promises';
+import path from 'path';
+import os from 'os';
+import { v4 as uuidv4 } from 'uuid';
+import { Language } from '@prisma/client';
+import { runContainer } from '../sandbox/container';
+import { ExecutionResult, LanguageConfig } from '../types/execution.types';
+
+const LANGUAGE_CONFIGS: Record<Language, LanguageConfig> = {
   PYTHON3: {
     image: 'codeex-python3:latest',
     fileName: 'solution.py',
@@ -1285,31 +2794,29 @@ const LANGUAGE_CONFIG = {
   },
 };
 
-async function executeCode({ language, code, input, timeLimitMs, memoryLimitMb }) {
-  const config = LANGUAGE_CONFIG[language];
+interface ExecuteOptions {
+  language: Language;
+  code: string;
+  input: string;
+  timeLimitMs: number;
+  memoryLimitMb: number;
+}
+
+export async function executeCode(options: ExecuteOptions): Promise<ExecutionResult> {
+  const { language, code, input, timeLimitMs, memoryLimitMb } = options;
+
+  const config = LANGUAGE_CONFIGS[language];
   if (!config) {
     throw new Error(`Unsupported language: ${language}`);
   }
 
-  // Create temp directory for this execution
   const tempDir = path.join(os.tmpdir(), `codeex-${uuidv4()}`);
-  await fs.mkdir(tempDir, { recursive: true });
-
-  // Write code to file
-  const codeFilePath = path.join(tempDir, config.fileName);
-  await fs.writeFile(codeFilePath, code);
-
-  // Write input to file
-  const inputFilePath = path.join(tempDir, 'input.txt');
-  await fs.writeFile(inputFilePath, input);
-
-  let stdout = '';
-  let stderr = '';
-  let exitCode = 0;
-  let executionTimeMs = 0;
-  let timedOut = false;
 
   try {
+    await fs.mkdir(tempDir, { recursive: true });
+    await fs.writeFile(path.join(tempDir, config.fileName), code);
+    await fs.writeFile(path.join(tempDir, 'input.txt'), input);
+
     // Compile if needed (Java)
     if (config.compileCmd) {
       const compileResult = await runContainer({
@@ -1317,7 +2824,7 @@ async function executeCode({ language, code, input, timeLimitMs, memoryLimitMb }
         cmd: config.compileCmd,
         binds: [`${tempDir}:/app:rw`],
         memoryMb: memoryLimitMb,
-        timeoutMs: 30000, // 30 seconds for compilation
+        timeoutMs: 30000,
       });
 
       if (compileResult.exitCode !== 0) {
@@ -1341,343 +2848,235 @@ async function executeCode({ language, code, input, timeLimitMs, memoryLimitMb }
       memoryMb: memoryLimitMb,
       timeoutMs: timeLimitMs,
     });
-    executionTimeMs = Date.now() - startTime;
+    const executionTimeMs = Date.now() - startTime;
 
-    stdout = runResult.stdout;
-    stderr = runResult.stderr;
-    exitCode = runResult.exitCode;
-    timedOut = runResult.timedOut;
+    return {
+      stdout: runResult.stdout.trim(),
+      stderr: runResult.stderr.trim(),
+      exitCode: runResult.exitCode,
+      executionTimeMs,
+      timedOut: runResult.timedOut,
+      compilationError: false,
+    };
   } finally {
-    // Cleanup temp directory
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
   }
-
-  return {
-    stdout: stdout.trim(),
-    stderr: stderr.trim(),
-    exitCode,
-    executionTimeMs,
-    timedOut,
-    compilationError: false,
-  };
 }
-
-async function runContainer({ image, cmd, binds, memoryMb, timeoutMs }) {
-  return new Promise(async (resolve) => {
-    let container;
-    let timeoutHandle;
-    let timedOut = false;
-
-    try {
-      container = await docker.createContainer({
-        Image: image,
-        Cmd: cmd,
-        WorkingDir: '/app',
-        User: '1000:1000',
-        HostConfig: {
-          Binds: binds,
-          Memory: memoryMb * 1024 * 1024,
-          MemorySwap: memoryMb * 1024 * 1024,
-          CpuPeriod: 100000,
-          CpuQuota: 50000, // 50% of one CPU
-          NetworkMode: 'none',
-          PidsLimit: 50,
-          ReadonlyRootfs: false, // Java needs to write .class files
-        },
-        AttachStdout: true,
-        AttachStderr: true,
-      });
-
-      // Set timeout
-      timeoutHandle = setTimeout(async () => {
-        timedOut = true;
-        try {
-          await container.kill();
-        } catch (e) {
-          // Container might have already finished
-        }
-      }, timeoutMs);
-
-      await container.start();
-
-      // Wait for container to finish
-      const waitResult = await container.wait();
-
-      clearTimeout(timeoutHandle);
-
-      // Get logs
-      const logs = await container.logs({
-        stdout: true,
-        stderr: true,
-      });
-
-      // Parse logs (Docker multiplexes stdout/stderr)
-      const output = parseDockerLogs(logs);
-
-      resolve({
-        stdout: output.stdout,
-        stderr: output.stderr,
-        exitCode: waitResult.StatusCode,
-        timedOut,
-      });
-    } catch (error) {
-      clearTimeout(timeoutHandle);
-      resolve({
-        stdout: '',
-        stderr: error.message,
-        exitCode: 1,
-        timedOut,
-      });
-    } finally {
-      // Cleanup container
-      if (container) {
-        try {
-          await container.remove({ force: true });
-        } catch (e) {
-          // Ignore cleanup errors
-        }
-      }
-    }
-  });
-}
-
-function parseDockerLogs(buffer) {
-  // Docker log format: 8-byte header + data
-  // Header: [stream_type (1 byte)][0,0,0][size (4 bytes)]
-  let stdout = '';
-  let stderr = '';
-  let offset = 0;
-
-  while (offset < buffer.length) {
-    if (offset + 8 > buffer.length) break;
-
-    const streamType = buffer[offset];
-    const size = buffer.readUInt32BE(offset + 4);
-
-    if (offset + 8 + size > buffer.length) break;
-
-    const data = buffer.slice(offset + 8, offset + 8 + size).toString('utf8');
-
-    if (streamType === 1) {
-      stdout += data;
-    } else if (streamType === 2) {
-      stderr += data;
-    }
-
-    offset += 8 + size;
-  }
-
-  return { stdout, stderr };
-}
-
-module.exports = { executeCode };
 ```
-
-**Success Criteria:** Module exports `executeCode` function.
 
 ---
 
-### Milestone 4.3 — Create Grader Module
+### Milestone 4.6 — Create Grader
 
-**What:** Compare user output with expected output.
+**What:** Compare user output with expected output and determine verdict.
 
-**File: `worker/src/grader/compare.js`**
-```javascript
-function compareOutput(actual, expected) {
-  // Normalize: trim whitespace, normalize line endings
-  const normalizedActual = actual
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .join('\n');
+**File: `worker/src/grader/comparator.ts`**
+```typescript
+export function compareOutput(actual: string, expected: string): boolean {
+  const normalize = (str: string): string =>
+    str
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .join('\n');
 
-  const normalizedExpected = expected
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .join('\n');
-
-  return normalizedActual === normalizedExpected;
+  return normalize(actual) === normalize(expected);
 }
+```
 
-function determineVerdict(results) {
-  // Check for compilation error first
+**File: `worker/src/grader/verdict.ts`**
+```typescript
+import { Verdict } from '@prisma/client';
+import { TestCaseResult } from '../types/execution.types';
+
+export function determineVerdict(results: TestCaseResult[]): Verdict {
   if (results.some((r) => r.compilationError)) {
     return 'COMPILATION_ERROR';
   }
 
-  // Check for timeout
   if (results.some((r) => r.timedOut)) {
     return 'TIME_LIMIT_EXCEEDED';
   }
 
-  // Check for runtime error
   if (results.some((r) => r.exitCode !== 0 && !r.timedOut)) {
     return 'RUNTIME_ERROR';
   }
 
-  // Check all test cases passed
   if (results.every((r) => r.passed)) {
     return 'ACCEPTED';
   }
 
   return 'WRONG_ANSWER';
 }
-
-module.exports = { compareOutput, determineVerdict };
 ```
-
-**Success Criteria:** Module exports comparison functions.
 
 ---
 
-### Milestone 4.4 — Create Worker Consumer
+### Milestone 4.7 — Create Job Processor
 
-**What:** BullMQ worker that processes execution jobs.
+**What:** Main job processing logic.
 
-**File: `worker/src/index.js`**
-```javascript
-require('dotenv').config();
-const { Worker } = require('bullmq');
-const IORedis = require('ioredis');
-const { PrismaClient } = require('@prisma/client');
-const { executeCode } = require('./executor/docker');
-const { compareOutput, determineVerdict } = require('./grader/compare');
+**File: `worker/src/processors/execution.processor.ts`**
+```typescript
+import { Job } from 'bullmq';
+import { prisma } from '../config/database';
+import { publisher } from '../config/redis';
+import { executeCode } from '../executor';
+import { compareOutput } from '../grader/comparator';
+import { determineVerdict } from '../grader/verdict';
+import { ExecutionJobPayload } from '../types/job.types';
+import { TestCaseResult, SubmissionResult } from '../types/execution.types';
 
-const prisma = new PrismaClient();
+export async function processExecutionJob(job: Job<ExecutionJobPayload>): Promise<SubmissionResult> {
+  const { submissionId, language, code, testCases, timeLimitMs, memoryLimitMb } = job.data;
 
-const connection = new IORedis(process.env.REDIS_URL, {
-  maxRetriesPerRequest: null,
-});
+  console.log(`[Worker] Processing submission: ${submissionId}`);
 
-// Redis publisher for real-time updates
-const publisher = new IORedis(process.env.REDIS_URL);
+  // Update status to EXECUTING
+  await prisma.submission.update({
+    where: { id: submissionId },
+    data: { status: 'EXECUTING' },
+  });
 
-const worker = new Worker(
-  'code-execution',
-  async (job) => {
-    const { submissionId, language, code, testCases, timeLimitMs, memoryLimitMb } = job.data;
+  const results: TestCaseResult[] = [];
+  let totalExecutionTime = 0;
 
-    console.log(`Processing submission: ${submissionId}`);
+  // Run each test case
+  for (const testCase of testCases) {
+    console.log(`[Worker]   Running test case: ${testCase.id}`);
 
-    // Update status to EXECUTING
-    await prisma.submission.update({
-      where: { id: submissionId },
-      data: { status: 'EXECUTING' },
+    const result = await executeCode({
+      language,
+      code,
+      input: testCase.input,
+      timeLimitMs,
+      memoryLimitMb,
     });
 
-    const results = [];
-    let totalExecutionTime = 0;
+    const passed =
+      !result.timedOut &&
+      !result.compilationError &&
+      result.exitCode === 0 &&
+      compareOutput(result.stdout, testCase.expectedOutput);
 
-    // Run each test case
-    for (const testCase of testCases) {
-      console.log(`  Running test case: ${testCase.id}`);
-
-      const result = await executeCode({
-        language,
-        code,
-        input: testCase.input,
-        timeLimitMs,
-        memoryLimitMb,
-      });
-
-      const passed = !result.timedOut &&
-        !result.compilationError &&
-        result.exitCode === 0 &&
-        compareOutput(result.stdout, testCase.expectedOutput);
-
-      results.push({
-        testCaseId: testCase.id,
-        passed,
-        ...result,
-      });
-
-      totalExecutionTime += result.executionTimeMs;
-
-      // If compilation error, skip remaining test cases
-      if (result.compilationError) {
-        break;
-      }
-    }
-
-    // Determine final verdict
-    const verdict = determineVerdict(results);
-
-    // Get first error output for display
-    const firstFailure = results.find((r) => !r.passed);
-    const stdout = results[0]?.stdout || '';
-    const stderr = firstFailure?.stderr || results[0]?.stderr || '';
-
-    // Update submission with results
-    await prisma.submission.update({
-      where: { id: submissionId },
-      data: {
-        status: 'COMPLETED',
-        verdict,
-        executionTimeMs: totalExecutionTime,
-        stdout: stdout.substring(0, 10000), // Limit stored output
-        stderr: stderr.substring(0, 10000),
-      },
+    results.push({
+      testCaseId: testCase.id,
+      passed,
+      ...result,
     });
 
-    // Publish result for real-time notification
-    const resultPayload = {
-      submissionId,
+    totalExecutionTime += result.executionTimeMs;
+
+    // If compilation error, skip remaining test cases
+    if (result.compilationError) break;
+  }
+
+  // Determine final verdict
+  const verdict = determineVerdict(results);
+
+  // Get output for display
+  const firstFailure = results.find((r) => !r.passed);
+  const stdout = results[0]?.stdout || '';
+  const stderr = firstFailure?.stderr || results[0]?.stderr || '';
+
+  // Update submission with results
+  await prisma.submission.update({
+    where: { id: submissionId },
+    data: {
       status: 'COMPLETED',
       verdict,
       executionTimeMs: totalExecutionTime,
-      passedCount: results.filter((r) => r.passed).length,
-      totalCount: testCases.length,
-    };
+      stdout: stdout.substring(0, 10000),
+      stderr: stderr.substring(0, 10000),
+    },
+  });
 
-    await publisher.publish(`submission:${submissionId}`, JSON.stringify(resultPayload));
+  // Publish result for real-time notification
+  const resultPayload: SubmissionResult = {
+    submissionId,
+    status: 'COMPLETED',
+    verdict,
+    executionTimeMs: totalExecutionTime,
+    passedCount: results.filter((r) => r.passed).length,
+    totalCount: testCases.length,
+  };
 
-    console.log(`Completed submission: ${submissionId} - ${verdict}`);
+  await publisher.publish(`submission:${submissionId}`, JSON.stringify(resultPayload));
 
-    return resultPayload;
-  },
-  {
-    connection,
-    concurrency: 2, // Process 2 jobs at a time
-  }
-);
+  console.log(`[Worker] Completed submission: ${submissionId} - ${verdict}`);
 
-worker.on('completed', (job) => {
-  console.log(`Job ${job.id} completed`);
-});
-
-worker.on('failed', (job, err) => {
-  console.error(`Job ${job.id} failed:`, err);
-});
-
-console.log('Worker started, waiting for jobs...');
-```
-
-**File: `worker/package.json` (add scripts)**
-```json
-{
-  "scripts": {
-    "dev": "nodemon src/index.js",
-    "start": "node src/index.js"
-  },
-  "dependencies": {
-    "uuid": "^9.0.0"
-  }
+  return resultPayload;
 }
 ```
 
-**Steps:**
-1. Add uuid to worker:
-   ```bash
-   cd worker
-   npm install uuid
-   ```
-2. Start the worker:
-   ```bash
-   npm run dev
-   ```
+---
 
-**Success Criteria:** Worker logs "Worker started, waiting for jobs..."
+### Milestone 4.8 — Create Worker Entry Point
+
+**What:** Initialize and start the BullMQ worker.
+
+**File: `worker/src/index.ts`**
+```typescript
+import { Worker } from 'bullmq';
+import { env } from './config/env';
+import { redis } from './config/redis';
+import { prisma } from './config/database';
+import { processExecutionJob } from './processors/execution.processor';
+import { ExecutionJobPayload } from './types/job.types';
+
+const QUEUE_NAME = 'code-execution';
+
+async function main(): Promise<void> {
+  console.log('[Worker] Starting execution worker...');
+
+  // Test database connection
+  await prisma.$connect();
+  console.log('[Worker] Database connected');
+
+  // Create worker
+  const worker = new Worker<ExecutionJobPayload>(
+    QUEUE_NAME,
+    processExecutionJob,
+    {
+      connection: redis,
+      concurrency: env.WORKER_CONCURRENCY,
+    }
+  );
+
+  worker.on('completed', (job) => {
+    console.log(`[Worker] Job ${job.id} completed`);
+  });
+
+  worker.on('failed', (job, err) => {
+    console.error(`[Worker] Job ${job?.id} failed:`, err.message);
+  });
+
+  worker.on('error', (err) => {
+    console.error('[Worker] Worker error:', err);
+  });
+
+  console.log(`[Worker] Listening for jobs on queue: ${QUEUE_NAME}`);
+  console.log(`[Worker] Concurrency: ${env.WORKER_CONCURRENCY}`);
+
+  // Graceful shutdown
+  const shutdown = async (signal: string) => {
+    console.log(`[Worker] ${signal} received, shutting down...`);
+    await worker.close();
+    await prisma.$disconnect();
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+}
+
+main().catch((err) => {
+  console.error('[Worker] Failed to start:', err);
+  process.exit(1);
+});
+```
+
+**Success Criteria:** `npm run dev` logs "Listening for jobs..."
 
 ---
 
@@ -1695,114 +3094,114 @@ End-to-end test:
 
 ---
 
-## Phase 5 — Real-time WebSocket Layer
+## Phase 5 — Real-time WebSocket Layer (TypeScript)
 
 **Goal:** Results push to browser instantly when worker finishes.
 
-### Milestone 5.1 — Add Socket.io to API Server
+### Milestone 5.1 — Install Socket.io Dependencies
 
-**What:** Set up WebSocket server with Redis adapter.
+```bash
+cd api
+npm install @socket.io/redis-adapter
+```
 
-**File: `api/src/websocket/socket.js`**
-```javascript
-const { Server } = require('socket.io');
-const { createAdapter } = require('@socket.io/redis-adapter');
-const { createClient } = require('redis');
+---
 
-async function setupWebSocket(httpServer) {
+### Milestone 5.2 — Create WebSocket Setup
+
+**What:** Set up Socket.io with Redis adapter for pub/sub.
+
+**File: `api/src/websocket/index.ts`**
+```typescript
+import http from 'http';
+import { Server, Socket } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
+import { createClient } from 'redis';
+import { env } from '../config/env';
+import { logger } from '../utils/logger';
+
+export async function setupWebSocket(httpServer: http.Server): Promise<Server> {
   const io = new Server(httpServer, {
     cors: {
-      origin: '*',
+      origin: env.NODE_ENV === 'production' ? false : '*',
       methods: ['GET', 'POST'],
     },
   });
 
-  // Setup Redis adapter for multi-server support
-  const pubClient = createClient({ url: process.env.REDIS_URL });
+  // Setup Redis adapter for multi-instance support
+  const pubClient = createClient({ url: env.REDIS_URL });
   const subClient = pubClient.duplicate();
 
   await Promise.all([pubClient.connect(), subClient.connect()]);
 
   io.adapter(createAdapter(pubClient, subClient));
 
-  // Subscribe to submission results
-  const subscriber = createClient({ url: process.env.REDIS_URL });
+  // Subscribe to submission results from worker
+  const subscriber = createClient({ url: env.REDIS_URL });
   await subscriber.connect();
 
-  // Pattern subscribe to all submission channels
   await subscriber.pSubscribe('submission:*', (message, channel) => {
     const submissionId = channel.split(':')[1];
     const payload = JSON.parse(message);
 
-    // Emit to the specific room
+    logger.debug(`WebSocket: Received result for ${submissionId}`);
     io.to(`submission:${submissionId}`).emit('result', payload);
   });
 
   // Handle client connections
-  io.on('connection', (socket) => {
-    console.log(`Client connected: ${socket.id}`);
+  io.on('connection', (socket: Socket) => {
+    logger.debug(`WebSocket: Client connected ${socket.id}`);
 
-    // Join submission room
-    socket.on('subscribe', (submissionId) => {
+    socket.on('subscribe', (submissionId: string) => {
       socket.join(`submission:${submissionId}`);
-      console.log(`${socket.id} subscribed to submission:${submissionId}`);
+      logger.debug(`WebSocket: ${socket.id} joined submission:${submissionId}`);
     });
 
-    // Leave submission room
-    socket.on('unsubscribe', (submissionId) => {
+    socket.on('unsubscribe', (submissionId: string) => {
       socket.leave(`submission:${submissionId}`);
     });
 
     socket.on('disconnect', () => {
-      console.log(`Client disconnected: ${socket.id}`);
+      logger.debug(`WebSocket: Client disconnected ${socket.id}`);
     });
   });
 
+  logger.info('WebSocket server initialized');
   return io;
 }
-
-module.exports = { setupWebSocket };
 ```
 
-**Install Redis adapter:**
-```bash
-cd api
-npm install @socket.io/redis-adapter redis
-```
-
-**Update: `api/src/index.js`**
-```javascript
-// Add at the top
-const { setupWebSocket } = require('./websocket/socket');
-
-// Replace server.listen with:
-server.listen(PORT, async () => {
-  console.log(`API Server running on port ${PORT}`);
-
-  // Setup WebSocket
-  await setupWebSocket(server);
-  console.log('WebSocket server ready');
-});
-```
-
-**Success Criteria:** Server logs "WebSocket server ready".
+**Note:** The `setupWebSocket` function is already called from `server.ts` (created in Phase 2).
 
 ---
 
 ## Phase 5 Checkpoint
 
-Test WebSocket with a simple HTML page or wscat:
+Test WebSocket end-to-end:
+
 ```bash
+# Terminal 1: Start services
+docker compose up -d
+cd api && npm run dev
+
+# Terminal 2: Start worker
+cd worker && npm run dev
+
+# Terminal 3: Test WebSocket
 npm install -g wscat
-wscat -c ws://localhost:8080/socket.io/?EIO=4&transport=websocket
+wscat -c "ws://localhost:8080/socket.io/?EIO=4&transport=websocket"
+
+# Or use browser console:
+# const socket = io('http://localhost:8080');
+# socket.on('result', (data) => console.log('Result:', data));
+# socket.emit('subscribe', '<submissionId>');
 ```
 
-Or test end-to-end:
-1. Open browser console
-2. Connect to Socket.io
-3. Subscribe to a submission
-4. Submit code via curl
-5. Watch console for 'result' event
+**Full flow test:**
+1. Register/login to get token
+2. Submit code via curl
+3. Immediately open WebSocket and subscribe to submissionId
+4. Watch for 'result' event with verdict
 
 ---
 
