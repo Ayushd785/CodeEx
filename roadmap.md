@@ -384,6 +384,39 @@ async create(data: Prisma.SubmissionCreateInput): Promise<Submission> {
 
 ---
 
+## Multi-language and Docker image strategy
+
+This covers languages such as **Rust** alongside Python and Java: same execution model, different sandbox image and compile/run commands.
+
+The product only allows languages from a **fixed list** in the UI (dropdown, scroller, or segmented control). The user **never** types a Docker image name or registry URL—so every submission maps to a **server-defined** image and compile/run recipe.
+
+### How adding a language like Rust works
+
+1. **Frontend** — Expose `RUST` (or `RUST_1_75`) as one of the selectable options next to Python and Java. Same pattern for any future language.
+2. **API** — `language` is validated against an **allowlist** (Prisma `enum`, Zod `nativeEnum`, or a shared constant). Reject anything not in the list.
+3. **Worker** — A static map, e.g. `LANGUAGE_CONFIG[RUST] → { image: 'codeex-rust:latest', compileCmd, runCmd }`, drives `docker pull` / `docker run`. No user input reaches the image field.
+
+### Pull once, run many times (same machine)
+
+| Moment | What happens |
+|--------|----------------|
+| **First Rust job on a worker host** | Docker daemon may **pull** the image if it is not local yet. That can add noticeable latency (network + layer download). |
+| **Later jobs on the same host** | Image layers are **cached** on disk. You skip the heavy download; time is mostly **compile + run + grade**. |
+| **Optional: warm-up** | On worker start or in deploy scripts, run `docker pull` for all supported images so the **first user** rarely pays cold-pull latency. |
+
+### Multi-worker / Kubernetes note
+
+Image cache is **per node**. A new Kubernetes node may still need a **first pull** for that language unless you **pre-load** images (init container, node image, or registry mirror). Plan for that when you scale out.
+
+### Implementation sketch (worker)
+
+- Before `createContainer`, ensure image exists: `docker.getImage(imageName).inspect()` — on 404, `docker.pull(imageName)` with the **same string** from your config map (never from the client).
+- Alternatively: shell out to `docker pull` once per language in a small `ensureImage(language)` helper with in-memory “already pulled on this process” flags to avoid repeated checks.
+
+This section complements **Phase 3 — Sandbox Docker Images**, where each language gets its own Dockerfile under `sandbox-images/<lang>/` and CI builds `codeex-<lang>:latest` for reproducible, reviewed environments.
+
+---
+
 ## Phase 0 — Environment Setup & Project Scaffold
 
 **Goal:** Full TypeScript monorepo structure with proper tooling configured.
@@ -2381,6 +2414,8 @@ api/src/
 ## Phase 3 — Sandbox Docker Images
 
 **Goal:** Custom Docker images for Python 3 and Java that can safely execute user code.
+
+**See also:** [Multi-language and Docker image strategy](#multi-language-and-docker-image-strategy) — how a **UI-only language picker** maps to whitelisted images, lazy `docker pull` on first use per worker node, and faster runs once layers are cached. Adding **Rust** (or any other language) is a new Dockerfile under `sandbox-images/`, a Prisma/API enum value, and a worker `LANGUAGE_CONFIG` entry—not a free-form image name from the client.
 
 ### Milestone 3.1 — Python 3 Sandbox Image
 
