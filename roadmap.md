@@ -118,13 +118,7 @@ code-execution-platform/
 │       ├── middleware/             # Express middleware
 │       │   ├── auth.middleware.ts  # JWT verification
 │       │   ├── error.middleware.ts # Global error handler
-│       │   ├── validate.middleware.ts # Zod validation middleware
 │       │   └── logger.middleware.ts   # Request logging
-│       │
-│       ├── validators/             # Zod schemas for request validation
-│       │   ├── auth.validator.ts
-│       │   ├── problem.validator.ts
-│       │   └── submission.validator.ts
 │       │
 │       ├── websocket/              # Socket.io setup
 │       │   ├── index.ts            # WebSocket initialization
@@ -151,11 +145,6 @@ code-execution-platform/
 │       │   ├── redis.ts            # Redis connection
 │       │   └── docker.ts           # Dockerode client configuration
 │       │
-│       ├── types/
-│       │   ├── index.ts
-│       │   ├── job.types.ts        # Job payload interfaces
-│       │   └── execution.types.ts  # Execution result interfaces
-│       │
 │       ├── processors/             # Job processors
 │       │   └── execution.processor.ts # Main job handler
 │       │
@@ -180,19 +169,6 @@ code-execution-platform/
 │       └── utils/
 │           ├── logger.ts
 │           └── temp-file.ts        # Temp directory management
-│
-├── shared/                         # Shared code between api and worker
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── src/
-│       ├── types/                  # Shared type definitions
-│       │   ├── submission.ts
-│       │   ├── verdict.ts
-│       │   └── language.ts
-│       ├── constants/              # Shared constants
-│       │   └── languages.ts        # Supported language configs
-│       └── utils/
-│           └── index.ts
 │
 ├── sandbox-images/                 # Docker images for code execution
 │   ├── python3/
@@ -241,9 +217,6 @@ code-execution-platform/
 │       │   ├── RegisterPage.tsx
 │       │   ├── ProblemsPage.tsx
 │       │   └── ProblemDetailPage.tsx
-│       │
-│       ├── types/                  # Frontend TypeScript types
-│       │   └── index.ts
 │       │
 │       └── utils/
 │           └── index.ts
@@ -552,13 +525,11 @@ npm init -y
     "baseUrl": "./src",
     "paths": {
       "@config/*": ["config/*"],
-      "@types/*": ["types/*"],
       "@routes/*": ["routes/*"],
       "@controllers/*": ["controllers/*"],
       "@services/*": ["services/*"],
       "@repositories/*": ["repositories/*"],
       "@middleware/*": ["middleware/*"],
-      "@validators/*": ["validators/*"],
       "@utils/*": ["utils/*"]
     }
   },
@@ -618,7 +589,6 @@ npm init -y
     "baseUrl": "./src",
     "paths": {
       "@config/*": ["config/*"],
-      "@types/*": ["types/*"],
       "@executor/*": ["executor/*"],
       "@grader/*": ["grader/*"],
       "@services/*": ["services/*"],
@@ -1373,93 +1343,28 @@ export const logger = {
 
 ---
 
-### Milestone 2.3 — Create Type Definitions
+### Milestone 2.3 — Create Middleware
 
-**What:** Define shared types used across the API.
+**What:** Auth and error handling middleware. Types are defined inline or use Prisma-generated types.
 
-**File: `api/src/types/index.ts`**
+**File: `api/src/middleware/auth.middleware.ts`**
 ```typescript
-import { Request } from 'express';
+import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+import { env } from '../config/env';
+import { UnauthorizedError } from '../utils/errors';
 
 export interface JwtPayload {
   userId: string;
   username: string;
-  iat?: number;
-  exp?: number;
 }
 
 export interface AuthenticatedRequest extends Request {
   user: JwtPayload;
 }
 
-export interface PaginationQuery {
-  page?: string;
-  limit?: string;
-}
-
-export interface PaginatedResponse<T> {
-  items: T[];
-  total: number;
-  page: number;
-  limit: number;
-  totalPages: number;
-}
-```
-
-**File: `api/src/types/submission.types.ts`**
-```typescript
-import { Language, Verdict, SubmissionStatus } from '@prisma/client';
-
-export interface CreateSubmissionDTO {
-  userId: string;
-  problemId: string;
-  language: Language;
-  code: string;
-}
-
-export interface SubmissionJobPayload {
-  submissionId: string;
-  userId: string;
-  problemId: string;
-  language: Language;
-  code: string;
-  testCases: TestCasePayload[];
-  timeLimitMs: number;
-  memoryLimitMb: number;
-}
-
-export interface TestCasePayload {
-  id: string;
-  input: string;
-  expectedOutput: string;
-}
-
-export interface SubmissionResult {
-  submissionId: string;
-  status: SubmissionStatus;
-  verdict: Verdict;
-  executionTimeMs: number;
-  passedCount: number;
-  totalCount: number;
-}
-```
-
----
-
-### Milestone 2.4 — Create Middleware
-
-**What:** Auth, validation, and error handling middleware.
-
-**File: `api/src/middleware/auth.middleware.ts`**
-```typescript
-import { Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
-import { env } from '../config/env';
-import { UnauthorizedError } from '../utils/errors';
-import { AuthenticatedRequest, JwtPayload } from '../types';
-
 export function authMiddleware(
-  req: AuthenticatedRequest,
+  req: Request,
   res: Response,
   next: NextFunction
 ): void {
@@ -1473,37 +1378,11 @@ export function authMiddleware(
 
   try {
     const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
-    req.user = decoded;
+    (req as AuthenticatedRequest).user = decoded;
     next();
   } catch (error) {
     throw new UnauthorizedError('Invalid or expired token');
   }
-}
-```
-
-**File: `api/src/middleware/validate.middleware.ts`**
-```typescript
-import { Request, Response, NextFunction } from 'express';
-import { ZodSchema, ZodError } from 'zod';
-import { BadRequestError } from '../utils/errors';
-
-export function validate(schema: ZodSchema) {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    try {
-      schema.parse({
-        body: req.body,
-        query: req.query,
-        params: req.params,
-      });
-      next();
-    } catch (error) {
-      if (error instanceof ZodError) {
-        const messages = error.errors.map((e) => `${e.path.join('.')}: ${e.message}`);
-        throw new BadRequestError(messages.join(', '));
-      }
-      throw error;
-    }
-  };
 }
 ```
 
@@ -1713,14 +1592,12 @@ export default router;
 ```typescript
 import { Router } from 'express';
 import { AuthController } from '../controllers/auth.controller';
-import { validate } from '../middleware/validate.middleware';
-import { registerSchema, loginSchema } from '../validators/auth.validator';
 
 const router = Router();
 const authController = new AuthController();
 
-router.post('/register', validate(registerSchema), authController.register);
-router.post('/login', validate(loginSchema), authController.login);
+router.post('/register', authController.register);
+router.post('/login', authController.login);
 
 export default router;
 ```
@@ -1744,15 +1621,13 @@ export default router;
 import { Router } from 'express';
 import { SubmissionController } from '../controllers/submission.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
-import { validate } from '../middleware/validate.middleware';
-import { createSubmissionSchema } from '../validators/submission.validator';
 
 const router = Router();
 const submissionController = new SubmissionController();
 
 router.use(authMiddleware as any); // All submission routes require auth
 
-router.post('/', validate(createSubmissionSchema), submissionController.create);
+router.post('/', submissionController.create);
 router.get('/', submissionController.getAll);
 router.get('/:id', submissionController.getById);
 
@@ -1763,54 +1638,7 @@ export default router;
 
 ---
 
-### Milestone 2.7 — Create Validators (Zod Schemas)
-
-**What:** Type-safe request validation with Zod.
-
-**File: `api/src/validators/auth.validator.ts`**
-```typescript
-import { z } from 'zod';
-
-export const registerSchema = z.object({
-  body: z.object({
-    username: z.string().min(3).max(30).regex(/^[a-zA-Z0-9_]+$/, {
-      message: 'Username can only contain letters, numbers, and underscores',
-    }),
-    email: z.string().email(),
-    password: z.string().min(8).max(100),
-  }),
-});
-
-export const loginSchema = z.object({
-  body: z.object({
-    email: z.string().email(),
-    password: z.string().min(1),
-  }),
-});
-
-export type RegisterInput = z.infer<typeof registerSchema>['body'];
-export type LoginInput = z.infer<typeof loginSchema>['body'];
-```
-
-**File: `api/src/validators/submission.validator.ts`**
-```typescript
-import { z } from 'zod';
-import { Language } from '@prisma/client';
-
-export const createSubmissionSchema = z.object({
-  body: z.object({
-    problemId: z.string().uuid(),
-    language: z.nativeEnum(Language),
-    code: z.string().min(1).max(50000),
-  }),
-});
-
-export type CreateSubmissionInput = z.infer<typeof createSubmissionSchema>['body'];
-```
-
----
-
-### Milestone 2.8 — Create Repositories (Data Access Layer)
+### Milestone 2.6 — Create Repositories (Data Access Layer)
 
 **What:** Isolated database queries, single responsibility.
 
@@ -1964,9 +1792,9 @@ export const submissionRepository = new SubmissionRepository();
 
 ---
 
-### Milestone 2.9 — Create Services (Business Logic)
+### Milestone 2.7 — Create Services (Business Logic)
 
-**What:** Core business logic, framework-agnostic.
+**What:** Core business logic, framework-agnostic. Types defined inline.
 
 **File: `api/src/services/auth.service.ts`**
 ```typescript
@@ -1976,10 +1804,13 @@ import { User } from '@prisma/client';
 import { env } from '../config/env';
 import { userRepository } from '../repositories/user.repository';
 import { ConflictError, UnauthorizedError } from '../utils/errors';
-import { JwtPayload } from '../types';
-import { RegisterInput, LoginInput } from '../validators/auth.validator';
 
-export interface AuthResult {
+interface JwtPayload {
+  userId: string;
+  username: string;
+}
+
+interface AuthResult {
   token: string;
   user: {
     id: string;
@@ -1989,8 +1820,7 @@ export interface AuthResult {
 }
 
 export class AuthService {
-  async register(input: RegisterInput): Promise<AuthResult> {
-    const { username, email, password } = input;
+  async register(username: string, email: string, password: string): Promise<AuthResult> {
 
     const existingUser = await userRepository.findByEmailOrUsername(email, username);
     if (existingUser) {
@@ -2017,9 +1847,7 @@ export class AuthService {
     };
   }
 
-  async login(input: LoginInput): Promise<AuthResult> {
-    const { email, password } = input;
-
+  async login(email: string, password: string): Promise<AuthResult> {
     const user = await userRepository.findByEmail(email);
     if (!user) {
       throw new UnauthorizedError('Invalid email or password');
@@ -2081,20 +1909,19 @@ export const problemService = new ProblemService();
 
 **File: `api/src/services/submission.service.ts`**
 ```typescript
-import { Submission } from '@prisma/client';
+import { Language, Submission } from '@prisma/client';
 import { submissionRepository } from '../repositories/submission.repository';
 import { problemRepository } from '../repositories/problem.repository';
 import { queueService } from './queue.service';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
-import { CreateSubmissionInput } from '../validators/submission.validator';
-import { SubmissionJobPayload } from '../types/submission.types';
 
 export class SubmissionService {
   async createSubmission(
     userId: string,
-    input: CreateSubmissionInput
+    problemId: string,
+    language: Language,
+    code: string
   ): Promise<{ submissionId: string; jobId: string }> {
-    const { problemId, language, code } = input;
 
     const problem = await problemRepository.findByIdWithAllTestCases(problemId);
     if (!problem) {
@@ -2109,7 +1936,7 @@ export class SubmissionService {
       status: 'PENDING',
     });
 
-    const jobPayload: SubmissionJobPayload = {
+    const jobId = await queueService.addExecutionJob({
       submissionId: submission.id,
       userId,
       problemId,
@@ -2122,9 +1949,7 @@ export class SubmissionService {
       })),
       timeLimitMs: problem.timeLimitMs,
       memoryLimitMb: problem.memoryLimitMb,
-    };
-
-    const jobId = await queueService.addExecutionJob(jobPayload);
+    });
 
     return { submissionId: submission.id, jobId };
   }
@@ -2154,7 +1979,6 @@ export const submissionService = new SubmissionService();
 ```typescript
 import { Queue } from 'bullmq';
 import { redis } from '../config/redis';
-import { SubmissionJobPayload } from '../types/submission.types';
 
 const QUEUE_NAME = 'code-execution';
 
@@ -2176,7 +2000,7 @@ export class QueueService {
     });
   }
 
-  async addExecutionJob(payload: SubmissionJobPayload): Promise<string> {
+  async addExecutionJob(payload: Record<string, unknown>): Promise<string> {
     const job = await this.queue.add('execute', payload);
     return job.id || 'unknown';
   }
@@ -2216,22 +2040,27 @@ redis.on('error', (err) => {
 
 ---
 
-### Milestone 2.10 — Create Controllers (HTTP Handlers)
+### Milestone 2.8 — Create Controllers (HTTP Handlers)
 
-**What:** Thin layer that handles HTTP, delegates to services.
+**What:** Thin layer that handles HTTP, delegates to services. Validation done inline.
 
 **File: `api/src/controllers/auth.controller.ts`**
 ```typescript
 import { Request, Response, NextFunction } from 'express';
 import { authService } from '../services/auth.service';
 import { sendSuccess, sendCreated } from '../utils/response';
-import { RegisterInput, LoginInput } from '../validators/auth.validator';
+import { BadRequestError } from '../utils/errors';
 
 export class AuthController {
   async register(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const input: RegisterInput = req.body;
-      const result = await authService.register(input);
+      const { username, email, password } = req.body;
+
+      if (!username || !email || !password) {
+        throw new BadRequestError('Username, email, and password are required');
+      }
+
+      const result = await authService.register(username, email, password);
       sendCreated(res, result);
     } catch (error) {
       next(error);
@@ -2240,8 +2069,13 @@ export class AuthController {
 
   async login(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const input: LoginInput = req.body;
-      const result = await authService.login(input);
+      const { email, password } = req.body;
+
+      if (!email || !password) {
+        throw new BadRequestError('Email and password are required');
+      }
+
+      const result = await authService.login(email, password);
       sendSuccess(res, result);
     } catch (error) {
       next(error);
@@ -2280,18 +2114,28 @@ export class ProblemController {
 
 **File: `api/src/controllers/submission.controller.ts`**
 ```typescript
-import { Response, NextFunction } from 'express';
+import { Request, Response, NextFunction } from 'express';
+import { Language } from '@prisma/client';
 import { submissionService } from '../services/submission.service';
 import { sendSuccess, sendAccepted } from '../utils/response';
-import { AuthenticatedRequest } from '../types';
-import { CreateSubmissionInput } from '../validators/submission.validator';
+import { BadRequestError } from '../utils/errors';
+import { AuthenticatedRequest } from '../middleware/auth.middleware';
 
 export class SubmissionController {
-  async create(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  async create(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const userId = req.user.userId;
-      const input: CreateSubmissionInput = req.body;
-      const result = await submissionService.createSubmission(userId, input);
+      const { problemId, language, code } = req.body;
+      const userId = (req as AuthenticatedRequest).user.userId;
+
+      if (!problemId || !language || !code) {
+        throw new BadRequestError('problemId, language, and code are required');
+      }
+
+      if (!Object.values(Language).includes(language)) {
+        throw new BadRequestError(`Invalid language. Must be one of: ${Object.values(Language).join(', ')}`);
+      }
+
+      const result = await submissionService.createSubmission(userId, problemId, language, code);
       sendAccepted(res, {
         message: 'Submission queued for execution',
         ...result,
@@ -2301,9 +2145,9 @@ export class SubmissionController {
     }
   }
 
-  async getById(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  async getById(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const userId = req.user.userId;
+      const userId = (req as AuthenticatedRequest).user.userId;
       const { id } = req.params;
       const submission = await submissionService.getSubmissionById(userId, id);
       sendSuccess(res, submission);
@@ -2312,9 +2156,9 @@ export class SubmissionController {
     }
   }
 
-  async getAll(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  async getAll(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const userId = req.user.userId;
+      const userId = (req as AuthenticatedRequest).user.userId;
       const submissions = await submissionService.getUserSubmissions(userId);
       sendSuccess(res, submissions);
     } catch (error) {
@@ -2374,9 +2218,6 @@ api/src/
 │   ├── env.ts                  # Environment validation
 │   ├── database.ts             # Prisma client
 │   └── redis.ts                # Redis client
-├── types/
-│   ├── index.ts                # Shared types
-│   └── submission.types.ts     # Submission types
 ├── routes/
 │   ├── index.ts                # Route aggregator
 │   ├── auth.routes.ts
@@ -2396,13 +2237,9 @@ api/src/
 │   ├── problem.repository.ts
 │   └── submission.repository.ts
 ├── middleware/
-│   ├── auth.middleware.ts
-│   ├── validate.middleware.ts
+│   ├── auth.middleware.ts      # Also exports JwtPayload, AuthenticatedRequest
 │   ├── error.middleware.ts
 │   └── logger.middleware.ts
-├── validators/
-│   ├── auth.validator.ts
-│   └── submission.validator.ts
 └── utils/
     ├── errors.ts
     ├── response.ts
