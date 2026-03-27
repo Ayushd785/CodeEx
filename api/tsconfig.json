@@ -16,13 +16,11 @@
     "baseUrl": "./src",
     "paths": {
       "@config/*": ["config/*"],
-      "@types/*": ["types/*"],
       "@routes/*": ["routes/*"],
       "@controllers/*": ["controllers/*"],
       "@services/*": ["services/*"],
       "@repositories/*": ["repositories/*"],
       "@middleware/*": ["middleware/*"],
-      "@validators/*": ["validators/*"],
       "@utils/*": ["utils/*"]
     }
   },
